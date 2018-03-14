@@ -1,4 +1,6 @@
 #include "basic/pregel-dev.h"
+#include <algorithm>
+#include <iterator>
 using namespace std;
 
 //input line format: vertexID \t numOfNeighbors neighbor1 neighbor2 ...
@@ -10,7 +12,13 @@ struct CCValue_pregel {
 	vector<VertexID> out_neighbor;
 	vector<VertexID> in_label;
 	vector<VertexID> out_label;
+	int min_pathOut_level[1000];
+	int min_pathIn_level[1000];
 	bool used[9];
+	void init() {
+		memset(min_pathIn_level, -1, sizeof(min_pathIn_level));
+		memset(min_pathOut_level, -1, sizeof(min_pathOut_level));
+	}
 };
 struct my_Message {
 	int id;
@@ -25,6 +33,8 @@ ibinstream & operator<<(ibinstream & m, const CCValue_pregel & v) {
 	m << v.out_neighbor;
 	m << v.in_label;
 	m << v.out_label;
+	m << v.min_pathIn_level;
+	m << v.min_pathOut_level;
 	return m;
 }
 
@@ -34,6 +44,8 @@ obinstream & operator>>(obinstream & m, CCValue_pregel & v) {
 	m >> v.out_neighbor;
 	m >> v.in_label;
 	m >> v.out_label;
+	m >> v.min_pathIn_level;
+	m >> v.min_pathOut_level;
 	return m;
 }
 ibinstream & operator<<(ibinstream & m, const my_Message & v) {
@@ -71,6 +83,7 @@ public:
 
 	virtual void compute(MessageContainer & messages) {
 		if (step_num() == 1) {
+			value().init(); //init min path level
 			my_Message a;
 			a.id = id;
 			a.level = a.min_level = value().level;
@@ -80,16 +93,44 @@ public:
 			broadcast(a);
 			vote_to_halt();
 		} else {
-			for (int i = 0; i < messages.size(); i++) {
+			int size=messages.size();
+			for (int i = 0; i < size; i++) {
 				my_Message a = messages[i];
-				if (a.level > value().level) {
+				if ((value().min_pathIn_level[a.id] != -1
+						&& value().min_pathIn_level[a.id] < a.level)||(value().min_pathOut_level[a.id] != -1
+						&& value().min_pathOut_level[a.id] < a.level))
 					continue;
-				}
-				if (a.level < value().level) {
-					if (a.fwdORbwd)
+				a.min_level = min(a.min_level, value().level);
+				if (a.min_level == a.level) {
+					if (a.fwdORbwd) {
+						if (value().min_pathIn_level[a.id] >= 0)
+							continue;
 						value().in_label.push_back(a.id);
-					else
+					} else {
+						if (value().min_pathOut_level[a.id] >= 0)
+							continue;
 						value().out_label.push_back(a.id);
+					}
+					broadcast(a);
+				} else if (a.min_level < a.level) {
+					vector<VertexID>::iterator Iter;
+					if (a.fwdORbwd) {
+						for (Iter = value().in_label.begin();
+								Iter != value().in_label.end(); Iter++) {
+							if (*Iter == a.id) {
+								value().in_label.erase(Iter);
+								break;
+							}
+						}
+					} else {
+						for (Iter = value().out_label.begin();
+								Iter != value().out_label.end(); Iter++) {
+							if (*Iter == a.id) {
+								value().out_label.erase(Iter);
+								break;
+							}
+						}
+					}
 					broadcast(a);
 				}
 			}
@@ -132,9 +173,9 @@ public:
 	}
 
 	virtual void toline(CCVertex_pregel* v, BufferedWriter & writer) {
-		int j=sprintf(buf, "%d\n", v->id);
+		int j = sprintf(buf, "%d\n", v->id);
 //		printf("%d\n\t", v->id);
-		j+=sprintf(buf+j, "in_label:");
+		j += sprintf(buf + j, "in_label:");
 //		printf("in_label:");
 		sort(v->value().in_label.begin(), v->value().in_label.end());
 		vector<VertexID>::iterator iter = unique(v->value().in_label.begin(),
@@ -142,44 +183,45 @@ public:
 		v->value().in_label.erase(iter, v->value().in_label.end());
 		for (iter = v->value().in_label.begin();
 				iter != v->value().in_label.end(); iter++) {
-			j+=sprintf(buf+j, "%d ", *iter);
+			j += sprintf(buf + j, "%d ", *iter);
 //			printf("%d ", *iter);
 		}
-		j+=sprintf(buf+j, "\n");
-		j+=sprintf(buf+j, "out_label:");
+		j += sprintf(buf + j, "\n");
+		j += sprintf(buf + j, "out_label:");
 //		printf("/n/t out_label:");
 		sort(v->value().out_label.begin(), v->value().out_label.end());
-		iter = unique(v->value().out_label.begin(),
-				v->value().out_label.end());
+		iter = unique(v->value().out_label.begin(), v->value().out_label.end());
 		v->value().out_label.erase(iter, v->value().out_label.end());
 		for (iter = v->value().out_label.begin();
 				iter != v->value().out_label.end(); iter++) {
-			j+=sprintf(buf+j, "%d ", *iter);
+			j += sprintf(buf + j, "%d ", *iter);
 //			printf("%d ", *iter);
 		}
-		j+=sprintf(buf+j, "\n");
+		j += sprintf(buf + j, "\n");
 		printf(buf);
 //		sprintf(buf, "/n");
 //		printf("/n");
 		writer.write(buf);
+	}
+}
+;
+
+class CCCombiner_pregel: public Combiner<my_Message> {
+public:
+	virtual void combine(my_Message & old, const my_Message & new_msg) {
+		if (old.id == new_msg.id&&old.fwdORbwd==new_msg.fwdORbwd){
+			old.min_level=min(old.min_level,new_msg.min_level);
 		}
 	}
-	;
+};
 
-//class CCCombiner_pregel: public Combiner<my_Message> {
-//public:
-//	virtual void combine(my_Message & old, const my_Message & new_msg) {
-//		if (old > new_msg)
-//			old = new_msg;
-//	}
-//};
-
-	void pregel_hashmin(string in_path, string out_path, bool use_combiner) {
-		WorkerParams param;
-		param.input_path = in_path;
-		param.output_path = out_path;
-		param.force_write = true;
-		param.native_dispatcher = false;
-		CCWorker_pregel worker;
-		worker.run(param);
-	}
+void pregel_hashmin(string in_path, string out_path, bool use_combiner) {
+	WorkerParams param;
+	param.input_path = in_path;
+	param.output_path = out_path;
+	param.force_write = true;
+	param.native_dispatcher = false;
+	CCWorker_pregel worker;
+	Combiner combine=new Combiner();
+	worker.run(param);
+}
