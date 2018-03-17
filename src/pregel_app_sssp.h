@@ -1,6 +1,5 @@
-#include "basic/pregel-dev.h"
-#include <algorithm>
-#include <iterator>
+#include "reqresp/req-dev.h"
+#include "utils/type.h"
 using namespace std;
 
 //input line format: vertexID \t numOfNeighbors neighbor1 neighbor2 ...
@@ -12,12 +11,17 @@ struct CCValue_pregel {
 	vector<VertexID> out_neighbor;
 	vector<VertexID> in_label;
 	vector<VertexID> out_label;
-	int min_pathOut_level[1000];
-	int min_pathIn_level[1000];
-	bool used[9];
+	vector<VertexID> in_respone;
+	vector<VertexID> out_respone;
+	bool used_in[1000];
+	bool used_out[1000];
+	bool min_pathOut_level[1000];
+	bool min_pathIn_level[1000];
 	void init() {
-		memset(min_pathIn_level, -1, sizeof(min_pathIn_level));
-		memset(min_pathOut_level, -1, sizeof(min_pathOut_level));
+		memset(min_pathIn_level, 0, sizeof(min_pathIn_level));
+		memset(min_pathOut_level, 0, sizeof(min_pathOut_level));
+		memset(used_in, 0, sizeof(used_in));
+		memset(used_out, 0, sizeof(used_out));
 	}
 };
 struct my_Message {
@@ -26,6 +30,15 @@ struct my_Message {
 	int min_level;
 	bool fwdORbwd; //ture -> forward and false -> backward
 };
+struct respond_message {
+	vector<VertexID> in;
+	vector<VertexID> out;
+	respond_message& operator =(const respond_message& b) {
+		in = b.in;
+		out = b.out;
+		return *this;
+	}
+};
 
 ibinstream & operator<<(ibinstream & m, const CCValue_pregel & v) {
 	m << v.level;
@@ -33,8 +46,6 @@ ibinstream & operator<<(ibinstream & m, const CCValue_pregel & v) {
 	m << v.out_neighbor;
 	m << v.in_label;
 	m << v.out_label;
-	m << v.min_pathIn_level;
-	m << v.min_pathOut_level;
 	return m;
 }
 
@@ -44,8 +55,6 @@ obinstream & operator>>(obinstream & m, CCValue_pregel & v) {
 	m >> v.out_neighbor;
 	m >> v.in_label;
 	m >> v.out_label;
-	m >> v.min_pathIn_level;
-	m >> v.min_pathOut_level;
 	return m;
 }
 ibinstream & operator<<(ibinstream & m, const my_Message & v) {
@@ -63,9 +72,21 @@ obinstream & operator>>(obinstream & m, my_Message & v) {
 	m >> v.fwdORbwd;
 	return m;
 }
+ibinstream & operator<<(ibinstream & m, const respond_message & v) {
+	m << v.in;
+	m << v.out;
+	return m;
+}
+
+obinstream & operator>>(obinstream & m, respond_message & v) {
+	m >> v.in;
+	m >> v.out;
+	return m;
+}
 
 //====================================
-class CCVertex_pregel: public Vertex<VertexID, CCValue_pregel, my_Message> {
+class CCVertex_pregel: public RVertex<VertexID, CCValue_pregel, my_Message,
+		respond_message> {
 public:
 	void broadcast(my_Message msg) {
 		if (msg.fwdORbwd) {
@@ -80,10 +101,15 @@ public:
 			}
 		}
 	}
-
+	virtual respond_message respond() //<< changed by yanda >>
+	{
+		respond_message a;
+		a.in = value().in_label;
+		a.out = value().out_label;
+		return a;
+	}
 	virtual void compute(MessageContainer & messages) {
 		if (step_num() == 1) {
-			value().init(); //init min path level
 			my_Message a;
 			a.id = id;
 			a.level = a.min_level = value().level;
@@ -93,57 +119,152 @@ public:
 			broadcast(a);
 			vote_to_halt();
 		} else {
-			int size=messages.size();
+			for (int i = 0; i < messages.size(); i++) {
+				int size = messages.size();
+				for (int i = 0; i < size; i++) {
+					my_Message a = messages[i];
+					if ((value().min_pathIn_level[a.id] != -1
+							&& value().min_pathIn_level[a.id] < a.level)
+							|| (value().min_pathOut_level[a.id] != -1
+									&& value().min_pathOut_level[a.id] < a.level))
+						continue;
+					a.min_level = min(a.min_level, value().level);
+					if (a.min_level == a.level) {
+						if (a.fwdORbwd) {
+							if (value().min_pathIn_level[a.id] >= 0)
+								continue;
+							value().in_label.push_back(a.id);
+						} else {
+							if (value().min_pathOut_level[a.id] >= 0)
+								continue;
+							value().out_label.push_back(a.id);
+						}
+						broadcast(a);
+					} else if (a.min_level < a.level) {
+						vector<VertexID>::iterator Iter;
+						if (a.fwdORbwd) {
+							for (Iter = value().in_label.begin();
+									Iter != value().in_label.end(); Iter++) {
+								if (*Iter == a.id) {
+									value().in_label.erase(Iter);
+									break;
+								}
+							}
+						} else {
+							for (Iter = value().out_label.begin();
+									Iter != value().out_label.end(); Iter++) {
+								if (*Iter == a.id) {
+									value().out_label.erase(Iter);
+									break;
+								}
+							}
+						}
+						broadcast(a);
+					}
+				}
+				vote_to_halt();
+			}
+		}
+	}
+	void compute(MessageContainer & messages, bool init, int batch) {
+		if (init) {
+			value().init(); //init min path level
+			if (value().level >= (batch - 1) * 1000 + 1
+					&& value().level <= batch * 1000) {
+				my_Message a;
+				a.level = value().level;
+				a.min_level = 0; //0 represent don't have a smaller one
+				a.fwdORbwd = 1;
+				broadcast(a);
+				a.fwdORbwd = 0;
+				broadcast(a);
+			}
+			vote_to_halt();
+		} else {
+			if (value().level < (batch - 1) * 1000 + 1)
+				return; // if it is the last batch's level,return immediately
+			int size = messages.size();
+			int size_in = value().in_respone.size();
+			int size_out = value().out_respone.size();
+			vector<VertexID> temp;
+			vector<VertexID> temp2;
+			int temp_size;
+			for (int i = 0; i < size_in; i++) {
+				temp = get_respond(value().in_respone[i]).in;
+				set_union(temp.begin(), temp.end(), value().in_label.begin(),
+						value().in_label.end(), inserter(temp2, temp2.begin()));
+				if (temp2.size() == 0) {
+					value().in_label.push_back(value().in_respone[i]);
+				}
+				temp2.clear();
+			}
+			for (int i = 0; i < size_out; i++) {
+				temp = get_respond(value().out_respone[i]).out;
+				set_union(temp.begin(), temp.end(), value().out_label.begin(),
+						value().out_label.end(),
+						inserter(temp2, temp2.begin()));
+				if (temp2.size() == 0) {
+					value().out_label.push_back(value().out_respone[i]);
+				}
+			}
 			for (int i = 0; i < size; i++) {
 				my_Message a = messages[i];
-				if ((value().min_pathIn_level[a.id] != -1
-						&& value().min_pathIn_level[a.id] < a.level)||(value().min_pathOut_level[a.id] != -1
-						&& value().min_pathOut_level[a.id] < a.level))
-					continue;
-				a.min_level = min(a.min_level, value().level);
-				if (a.min_level == a.level) {
-					if (a.fwdORbwd) {
-						if (value().min_pathIn_level[a.id] >= 0)
-							continue;
-						value().in_label.push_back(a.id);
-					} else {
-						if (value().min_pathOut_level[a.id] >= 0)
-							continue;
-						value().out_label.push_back(a.id);
-					}
-					broadcast(a);
-				} else if (a.min_level < a.level) {
-					vector<VertexID>::iterator Iter;
-					if (a.fwdORbwd) {
-						for (Iter = value().in_label.begin();
-								Iter != value().in_label.end(); Iter++) {
-							if (*Iter == a.id) {
-								value().in_label.erase(Iter);
-								break;
+				if ((a.fwdORbwd && value().min_pathIn_level[a.level])
+						|| (!a.fwdORbwd && value().min_pathOut_level))
+					continue; //has be used
+				//				if(a.level<value().level)a.min_level=0;
+				if (a.level < value().level) {
+					if (a.min_level) {
+						if (a.fwdORbwd) {
+							//request get
+							request(a.id);
+							value().in_respone.push_back(a.id);
+							//value().in_label.push_back(a.level);
+						} else {
+							//requset get
+							request(a.id);
+							value().out_respone.push_back(a.id);
+							//value().out_label.push_back(a.level);
+						}
+						broadcast(a);
+					} else if (!a.min_level) {
+						vector<VertexID>::iterator Iter;
+						if (a.fwdORbwd) {
+							value().min_pathIn_level[a.id] = 1;
+							for (Iter = value().in_label.begin();
+									Iter != value().in_label.end(); Iter++) {
+								if (*Iter == a.level) {
+									value().in_label.erase(Iter);
+									break;
+								}
+							}
+						} else {
+							value().min_pathOut_level[a.id] = 1; // log that there is a smaller one between this two vertexes
+							for (Iter = value().out_label.begin();
+									Iter != value().out_label.end(); Iter++) {
+								if (*Iter == a.level) {
+									value().out_label.erase(Iter);
+									break;
+								}
 							}
 						}
-					} else {
-						for (Iter = value().out_label.begin();
-								Iter != value().out_label.end(); Iter++) {
-							if (*Iter == a.id) {
-								value().out_label.erase(Iter);
-								break;
-							}
-						}
+						broadcast(a);
 					}
+				} else {
+					a.min_level = 1; // there is a smaller  level in one path.
 					broadcast(a);
 				}
 			}
-			vote_to_halt();
 		}
+		vote_to_halt();
 	}
 };
 
-class CCWorker_pregel: public Worker<CCVertex_pregel> {
+class CCWorker_pregel: public RWorker<CCVertex_pregel> {
 	char buf[100];
 
 public:
-	//C version
+//C version
 	virtual CCVertex_pregel* toVertex(char* line) {
 		char * pch;
 		pch = strtok(line, "\t");
@@ -206,14 +327,13 @@ public:
 }
 ;
 
-class CCCombiner_pregel: public Combiner<my_Message> {
-public:
-	virtual void combine(my_Message & old, const my_Message & new_msg) {
-		if (old.id == new_msg.id&&old.fwdORbwd==new_msg.fwdORbwd){
-			old.min_level=min(old.min_level,new_msg.min_level);
-		}
-	}
-};
+//class CCCombiner_pregel: public Combiner<my_Message> {
+//public:
+//	virtual void combine(my_Message & old, const my_Message & new_msg) {
+//		if (old > new_msg)
+//			old = new_msg;
+//	}
+//};
 
 void pregel_hashmin(string in_path, string out_path, bool use_combiner) {
 	WorkerParams param;
@@ -222,6 +342,5 @@ void pregel_hashmin(string in_path, string out_path, bool use_combiner) {
 	param.force_write = true;
 	param.native_dispatcher = false;
 	CCWorker_pregel worker;
-	Combiner combine=new Combiner();
 	worker.run(param);
 }
