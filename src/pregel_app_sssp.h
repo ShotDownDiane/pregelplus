@@ -1,5 +1,6 @@
-#include "reqresp/req-dev.h"
+#include "basic/pregel-dev.h"
 #include "utils/type.h"
+#include "basic/Worker.h"
 using namespace std;
 
 //input line format: vertexID \t numOfNeighbors neighbor1 neighbor2 ...
@@ -85,8 +86,7 @@ obinstream & operator>>(obinstream & m, respond_message & v) {
 }
 
 //====================================
-class CCVertex_pregel: public RVertex<VertexID, CCValue_pregel, my_Message,
-		respond_message> {
+class CCVertex_pregel: public Vertex<VertexID, CCValue_pregel, my_Message> {
 public:
 	void broadcast(my_Message msg) {
 		if (msg.fwdORbwd) {
@@ -101,73 +101,123 @@ public:
 			}
 		}
 	}
-	virtual respond_message respond() //<< changed by yanda >>
-	{
-		respond_message a;
-		a.in = value().in_label;
-		a.out = value().out_label;
-		return a;
-	}
+//	virtual void compute(MessageContainer & messages) {
+//		if (step_num() == 1) {
+//			my_Message a;
+//			a.id = id;
+//			a.level = a.min_level = value().level;
+//			a.fwdORbwd = 1;
+//			broadcast(a);
+//			a.fwdORbwd = 0;
+//			broadcast(a);
+//			vote_to_halt();
+//		} else {
+//			for (int i = 0; i < messages.size(); i++) {
+//				int size = messages.size();
+//				for (int i = 0; i < size; i++) {
+//					my_Message a = messages[i];
+//					if ((value().min_pathIn_level[a.id] != -1
+//							&& value().min_pathIn_level[a.id] < a.level)
+//							|| (value().min_pathOut_level[a.id] != -1
+//									&& value().min_pathOut_level[a.id] < a.level))
+//						continue;
+//					a.min_level = min(a.min_level, value().level);
+//					if (a.min_level == a.level) {
+//						if (a.fwdORbwd) {
+//							if (value().min_pathIn_level[a.id] >= 0)
+//								continue;
+//							value().in_label.push_back(a.id);
+//			virtual void compute(MessageContainer & messages) {
+	//		if (step_num() == 1) {
+	//			my_Message a;
+	//			a.id = id;
+	//			a.level = a.min_level = value().level;
+	//			a.fwdORbwd = 1;
+	//			broadcast(a);
+	//			a.fwdORbwd = 0;
+	//			broadcast(a);
+	//			vote_to_halt();
+	//		} else {
+	//			for (int i = 0; i < messages.size(); i++) {
+	//				int size = messages.size();
+	//				for (int i = 0; i < size; i++) {
+	//					my_Message a = messages[i];
+	//					if ((value().min_pathIn_level[a.id] != -1
+	//							&& value().min_pathIn_level[a.id] < a.level)
+	//							|| (value().min_pathOut_level[a.id] != -1
+	//									&& value().min_pathOut_level[a.id] < a.level))
+	//						continue;
+	//					a.min_level = min(a.min_level, value().level);
+	//					if (a.min_level == a.level) {
+	//						if (a.fwdORbwd) {
+	//							if (value().min_pathIn_level[a.id] >= 0)
+	//								continue;
+	//							value().in_label.push_back(a.id);
+	//						} else {
+	//							if (value().min_pathOut_level[a.id] >= 0)
+	//								continue;
+	//							value().out_label.push_back(a.id);
+	//						}
+	//						broadcast(a);
+	//					} else if (a.min_level < a.level) {
+	//						vector<VertexID>::iterator Iter;
+	//						if (a.fwdORbwd) {
+	//							for (Iter = value().in_label.begin();
+	//									Iter != value().in_label.end(); Iter++) {
+	//								if (*Iter == a.id) {
+	//									value().in_label.erase(Iter);
+	//									break;
+	//								}
+	//							}
+	//						} else {
+	//							for (Iter = value().out_label.begin();
+	//									Iter != value().out_label.end(); Iter++) {
+	//								if (*Iter == a.id) {
+	//									value().out_label.erase(Iter);
+	//									break;
+	//								}
+	//							}
+	//						}
+	//						broadcast(a);
+	//					}
+	//				}
+	//				vote_to_halt();
+	//			}
+	//		}
+	//	}			} else {
+//							if (value().min_pathOut_level[a.id] >= 0)
+//								continue;
+//							value().out_label.push_back(a.id);
+//						}
+//						broadcast(a);
+//					} else if (a.min_level < a.level) {
+//						vector<VertexID>::iterator Iter;
+//						if (a.fwdORbwd) {
+//							for (Iter = value().in_label.begin();
+//									Iter != value().in_label.end(); Iter++) {
+//								if (*Iter == a.id) {
+//									value().in_label.erase(Iter);
+//									break;
+//								}
+//							}
+//						} else {
+//							for (Iter = value().out_label.begin();
+//									Iter != value().out_label.end(); Iter++) {
+//								if (*Iter == a.id) {
+//									value().out_label.erase(Iter);
+//									break;
+//								}
+//							}
+//						}
+//						broadcast(a);
+//					}
+//				}
+//				vote_to_halt();
+//			}
+//		}
+//	}
 	virtual void compute(MessageContainer & messages) {
-		if (step_num() == 1) {
-			my_Message a;
-			a.id = id;
-			a.level = a.min_level = value().level;
-			a.fwdORbwd = 1;
-			broadcast(a);
-			a.fwdORbwd = 0;
-			broadcast(a);
-			vote_to_halt();
-		} else {
-			for (int i = 0; i < messages.size(); i++) {
-				int size = messages.size();
-				for (int i = 0; i < size; i++) {
-					my_Message a = messages[i];
-					if ((value().min_pathIn_level[a.id] != -1
-							&& value().min_pathIn_level[a.id] < a.level)
-							|| (value().min_pathOut_level[a.id] != -1
-									&& value().min_pathOut_level[a.id] < a.level))
-						continue;
-					a.min_level = min(a.min_level, value().level);
-					if (a.min_level == a.level) {
-						if (a.fwdORbwd) {
-							if (value().min_pathIn_level[a.id] >= 0)
-								continue;
-							value().in_label.push_back(a.id);
-						} else {
-							if (value().min_pathOut_level[a.id] >= 0)
-								continue;
-							value().out_label.push_back(a.id);
-						}
-						broadcast(a);
-					} else if (a.min_level < a.level) {
-						vector<VertexID>::iterator Iter;
-						if (a.fwdORbwd) {
-							for (Iter = value().in_label.begin();
-									Iter != value().in_label.end(); Iter++) {
-								if (*Iter == a.id) {
-									value().in_label.erase(Iter);
-									break;
-								}
-							}
-						} else {
-							for (Iter = value().out_label.begin();
-									Iter != value().out_label.end(); Iter++) {
-								if (*Iter == a.id) {
-									value().out_label.erase(Iter);
-									break;
-								}
-							}
-						}
-						broadcast(a);
-					}
-				}
-				vote_to_halt();
-			}
-		}
-	}
-	void compute(MessageContainer & messages, bool init, int batch) {
-		if (init) {
+		if (step_num==1||init_bit) {
 			value().init(); //init min path level
 			if (value().level >= (batch - 1) * 1000 + 1
 					&& value().level <= batch * 1000) {
@@ -184,29 +234,7 @@ public:
 			if (value().level < (batch - 1) * 1000 + 1)
 				return; // if it is the last batch's level,return immediately
 			int size = messages.size();
-			int size_in = value().in_respone.size();
-			int size_out = value().out_respone.size();
 			vector<VertexID> temp;
-			vector<VertexID> temp2;
-			int temp_size;
-			for (int i = 0; i < size_in; i++) {
-				temp = get_respond(value().in_respone[i]).in;
-				set_union(temp.begin(), temp.end(), value().in_label.begin(),
-						value().in_label.end(), inserter(temp2, temp2.begin()));
-				if (temp2.size() == 0) {
-					value().in_label.push_back(value().in_respone[i]);
-				}
-				temp2.clear();
-			}
-			for (int i = 0; i < size_out; i++) {
-				temp = get_respond(value().out_respone[i]).out;
-				set_union(temp.begin(), temp.end(), value().out_label.begin(),
-						value().out_label.end(),
-						inserter(temp2, temp2.begin()));
-				if (temp2.size() == 0) {
-					value().out_label.push_back(value().out_respone[i]);
-				}
-			}
 			for (int i = 0; i < size; i++) {
 				my_Message a = messages[i];
 				if ((a.fwdORbwd && value().min_pathIn_level[a.level])
@@ -217,13 +245,27 @@ public:
 					if (a.min_level) {
 						if (a.fwdORbwd) {
 							//request get
-							request(a.id);
-							value().in_respone.push_back(a.id);
+							set_union(mir[a.id - batch * 1000].out.begin(),
+									mir[a.id - batch * 1000].out.end(),
+									value().in_label.begin(),
+									value().in_label.end(),
+									inserter(temp, temp.begin()));
+							if (temp.size() == 0) {
+								value().in_label.push_back(a.id);
+							}
+							temp.clear();
 							//value().in_label.push_back(a.level);
 						} else {
 							//requset get
-							request(a.id);
-							value().out_respone.push_back(a.id);
+							set_union(mir[a.id - batch * 1000].in.begin(),
+									mir[a.id - batch * 1000].in.end(),
+									value().out_label.begin(),
+									value().out_label.end(),
+									inserter(temp, temp.begin()));
+							if (temp.size() == 0) {
+								value().out_label.push_back(a.id);
+							}
+							temp.clear();
 							//value().out_label.push_back(a.level);
 						}
 						broadcast(a);
@@ -260,7 +302,7 @@ public:
 	}
 };
 
-class CCWorker_pregel: public RWorker<CCVertex_pregel> {
+class CCWorker_pregel: public Worker<CCVertex_pregel> {
 	char buf[100];
 
 public:
