@@ -10,18 +10,18 @@
 #include "../utils/Combiner.h"
 #include "../utils/Aggregator.h"
 using namespace std;
-
+#define BATCH_SIZE 4
 struct mirror_vertex {
 	int id;
 	vector<VertexID> in;
 	vector<VertexID> out;
 	mirror_vertex& operator=(const  mirror_vertex& v){
 		id=v.id;
-		in=v.in;
-		out=v.out;
+//		in.insert(in.begin(),v.in.begin(),v.in.end());
+//		out.insert(out.begin(),v.out.begin(),v.out.end());
 		return *this;
 	}
-} mir[1000];
+} mir[BATCH_SIZE+1];
 ibinstream & operator<<(ibinstream & m, const mirror_vertex & v) {
 	m << v.id;
 	m << v.in;
@@ -392,23 +392,29 @@ public:
 				active_vnum() = all_sum(active_count);
 				if (active_vnum() == 0
 						&& getBit(HAS_MSG_ORBIT, bits_bor) == 0) {
-					if (batch == get_vnum() / 1000)
+					if (batch == (get_vnum() / BATCH_SIZE)+1){
 						break; //all_halt AND no_msg
+					}
 					batch++;
 					int size = vertexes.size();
 					vector<mirror_vertex>temp;
 					for(int i=0;i<size;i++){
-						if(vertexes[i]->value().level>(batch-1)*1000&&vertexes[i]->value().level<=(batch)*1000){
+						if(vertexes[i]->value().level>(batch-1)*BATCH_SIZE&&vertexes[i]->value().level<=(batch)*BATCH_SIZE){
 							temp.push_back({vertexes[i]->id,vertexes[i]->value().in_neighbor,vertexes[i]->value().out_neighbor});
 						}
 					}
-					temp=all_to_all (temp);
-					int temp_size=temp.size();
-					for(int i=0;i<temp_size;i++){
-						mir[temp[i].id-batch*1000-1]=temp[i];
-					}
+					vector<mirror_vertex> to_get;
+					all_to_all<mirror_vertex>(temp,to_get);
+					int get_size=to_get.size();
+//					for(int i=0;i<get_size;i++){
+//						cout << to_get[i].id-(batch-1)*BATCH_SIZE-1 << endl;
+//						mir[1]=temp[1];
+//					}
+
+					cout << get_size<<"*"<<to_get[1].id << endl;
+
+					init_bit = 1;
 				}
-				init_bit=1;
 			} else
 				active_vnum() = get_vnum();
 			//===================

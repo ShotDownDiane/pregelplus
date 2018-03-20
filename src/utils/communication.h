@@ -69,6 +69,57 @@ obinstream recv_obinstream(int src) {
 	pregel_recv(buf, size, src);
 	return obinstream(buf, size);
 }
+template<class T>
+void all_to_all(vector<T> to_exchange,vector<T>& temp) {
+	StartTimer(COMMUNICATION_TIMER);
+	//for each to_exchange[i]
+	//        send out *to_exchange[i] to i
+	//        save received data in *to_exchange[i]
+	int np = get_num_workers();
+	int me = get_worker_id();
+	vector<T> temp2;
+	for (int i = 0; i < np; i++) {
+		int partner = (i - me + np) % np;
+		if (me != partner) {
+			if (me < partner) {
+				StartTimer(SERIALIZATION_TIMER);
+				//send
+				ibinstream m;
+				m << to_exchange;
+				StopTimer(SERIALIZATION_TIMER);
+				StartTimer(TRANSFER_TIMER);
+				send_ibinstream(m, partner);
+				StopTimer(TRANSFER_TIMER);
+				//receive
+				StartTimer(TRANSFER_TIMER);
+				obinstream um = recv_obinstream(partner);
+				StopTimer(TRANSFER_TIMER);
+				StartTimer(SERIALIZATION_TIMER);
+				um >> temp2;
+				temp.insert(temp.end(), temp2.begin(), temp2.end());
+				temp2.clear();
+				StopTimer(SERIALIZATION_TIMER);
+			} else {
+				StartTimer(TRANSFER_TIMER);
+				//receive
+				obinstream um = recv_obinstream(partner);
+				StopTimer(TRANSFER_TIMER);
+				StartTimer(SERIALIZATION_TIMER);
+				um >> temp2;
+				temp.insert(temp.end(), temp2.begin(), temp2.end());
+				temp2.clear();
+				//send
+				ibinstream m;
+				m << to_exchange;
+				StopTimer(SERIALIZATION_TIMER);
+				StartTimer(TRANSFER_TIMER);
+				send_ibinstream(m, partner);
+				StopTimer(TRANSFER_TIMER);
+			}
+		}
+	}
+	StopTimer(COMMUNICATION_TIMER);
+}
 
 //============================================
 //obj-level send/recv
@@ -137,58 +188,8 @@ void all_to_all(std::vector<T>& to_exchange) {
 	}
 	StopTimer(COMMUNICATION_TIMER);
 }
-vector<mirror_vertex> all_to_all(std::vector<mirror_vertex> to_exchange) {
-	StartTimer(COMMUNICATION_TIMER);
-	//for each to_exchange[i]
-	//        send out *to_exchange[i] to i
-	//        save received data in *to_exchange[i]
-	int np = get_num_workers();
-	int me = get_worker_id();
-	vector<mirror_vertex> temp;
-	vector<mirror_vertex> temp2;
-	for (int i = 0; i < np; i++) {
-		int partner = (i - me + np) % np;
-		if (me != partner) {
-			if (me < partner) {
-				StartTimer(SERIALIZATION_TIMER);
-				//send
-				ibinstream m;
-				m << to_exchange;
-				StopTimer(SERIALIZATION_TIMER);
-				StartTimer(TRANSFER_TIMER);
-				send_ibinstream(m, partner);
-				StopTimer(TRANSFER_TIMER);
-				//receive
-				StartTimer(TRANSFER_TIMER);
-				obinstream um = recv_obinstream(partner);
-				StopTimer(TRANSFER_TIMER);
-				StartTimer(SERIALIZATION_TIMER);
-				um >> temp2;
-				temp.insert(temp.end(), temp2.begin(), temp2.end());
-				temp2.clear();
-				StopTimer(SERIALIZATION_TIMER);
-			} else {
-				StartTimer(TRANSFER_TIMER);
-				//receive
-				obinstream um = recv_obinstream(partner);
-				StopTimer(TRANSFER_TIMER);
-				StartTimer(SERIALIZATION_TIMER);
-				um >> temp2;
-				temp.insert(temp.end(), temp2.begin(), temp2.end());
-				temp2.clear();
-				//send
-				ibinstream m;
-				m << to_exchange;
-				StopTimer(SERIALIZATION_TIMER);
-				StartTimer(TRANSFER_TIMER);
-				send_ibinstream(m, partner);
-				StopTimer(TRANSFER_TIMER);
-			}
-		}
-	}
-	StopTimer(COMMUNICATION_TIMER);
-	return temp;
-}
+
+
 template<class T, class T1>
 void all_to_all_cat(std::vector<T>& to_exchange1,
 		std::vector<T1>& to_exchange2) {

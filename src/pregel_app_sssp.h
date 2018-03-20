@@ -14,10 +14,10 @@ struct CCValue_pregel {
 	vector<VertexID> out_label;
 	vector<VertexID> in_respone;
 	vector<VertexID> out_respone;
-	bool used_in[1000];
-	bool used_out[1000];
-	bool min_pathOut_level[1000];
-	bool min_pathIn_level[1000];
+	bool used_in[BATCH_SIZE];
+	bool used_out[BATCH_SIZE];
+	bool min_pathOut_level[BATCH_SIZE];
+	bool min_pathIn_level[BATCH_SIZE];
 	void init() {
 		memset(min_pathIn_level, 0, sizeof(min_pathIn_level));
 		memset(min_pathOut_level, 0, sizeof(min_pathOut_level));
@@ -93,213 +93,105 @@ public:
 			vector<VertexID> & nbs = value().out_neighbor;
 			for (int i = 0; i < nbs.size(); i++) {
 				send_message(nbs[i], msg);
+				cout <<msg.fwdORbwd <<msg.id<<nbs[i]<< endl;
 			}
 		} else {
 			vector<VertexID> & nbs = value().in_neighbor;
 			for (int i = 0; i < nbs.size(); i++) {
 				send_message(nbs[i], msg);
+				cout <<msg.fwdORbwd <<msg.id<<nbs[i] << endl;
 			}
 		}
 	}
-//	virtual void compute(MessageContainer & messages) {
-//		if (step_num() == 1) {
-//			my_Message a;
-//			a.id = id;
-//			a.level = a.min_level = value().level;
-//			a.fwdORbwd = 1;
-//			broadcast(a);
-//			a.fwdORbwd = 0;
-//			broadcast(a);
-//			vote_to_halt();
-//		} else {
-//			for (int i = 0; i < messages.size(); i++) {
-//				int size = messages.size();
-//				for (int i = 0; i < size; i++) {
-//					my_Message a = messages[i];
-//					if ((value().min_pathIn_level[a.id] != -1
-//							&& value().min_pathIn_level[a.id] < a.level)
-//							|| (value().min_pathOut_level[a.id] != -1
-//									&& value().min_pathOut_level[a.id] < a.level))
-//						continue;
-//					a.min_level = min(a.min_level, value().level);
-//					if (a.min_level == a.level) {
-//						if (a.fwdORbwd) {
-//							if (value().min_pathIn_level[a.id] >= 0)
-//								continue;
-//							value().in_label.push_back(a.id);
-//			virtual void compute(MessageContainer & messages) {
-	//		if (step_num() == 1) {
-	//			my_Message a;
-	//			a.id = id;
-	//			a.level = a.min_level = value().level;
-	//			a.fwdORbwd = 1;
-	//			broadcast(a);
-	//			a.fwdORbwd = 0;
-	//			broadcast(a);
-	//			vote_to_halt();
-	//		} else {
-	//			for (int i = 0; i < messages.size(); i++) {
-	//				int size = messages.size();
-	//				for (int i = 0; i < size; i++) {
-	//					my_Message a = messages[i];
-	//					if ((value().min_pathIn_level[a.id] != -1
-	//							&& value().min_pathIn_level[a.id] < a.level)
-	//							|| (value().min_pathOut_level[a.id] != -1
-	//									&& value().min_pathOut_level[a.id] < a.level))
-	//						continue;
-	//					a.min_level = min(a.min_level, value().level);
-	//					if (a.min_level == a.level) {
-	//						if (a.fwdORbwd) {
-	//							if (value().min_pathIn_level[a.id] >= 0)
-	//								continue;
-	//							value().in_label.push_back(a.id);
-	//						} else {
-	//							if (value().min_pathOut_level[a.id] >= 0)
-	//								continue;
-	//							value().out_label.push_back(a.id);
-	//						}
-	//						broadcast(a);
-	//					} else if (a.min_level < a.level) {
-	//						vector<VertexID>::iterator Iter;
-	//						if (a.fwdORbwd) {
-	//							for (Iter = value().in_label.begin();
-	//									Iter != value().in_label.end(); Iter++) {
-	//								if (*Iter == a.id) {
-	//									value().in_label.erase(Iter);
-	//									break;
-	//								}
-	//							}
-	//						} else {
-	//							for (Iter = value().out_label.begin();
-	//									Iter != value().out_label.end(); Iter++) {
-	//								if (*Iter == a.id) {
-	//									value().out_label.erase(Iter);
-	//									break;
-	//								}
-	//							}
-	//						}
-	//						broadcast(a);
-	//					}
-	//				}
-	//				vote_to_halt();
-	//			}
-	//		}
-	//	}			} else {
-//							if (value().min_pathOut_level[a.id] >= 0)
-//								continue;
-//							value().out_label.push_back(a.id);
-//						}
-//						broadcast(a);
-//					} else if (a.min_level < a.level) {
-//						vector<VertexID>::iterator Iter;
-//						if (a.fwdORbwd) {
-//							for (Iter = value().in_label.begin();
-//									Iter != value().in_label.end(); Iter++) {
-//								if (*Iter == a.id) {
-//									value().in_label.erase(Iter);
-//									break;
-//								}
-//							}
-//						} else {
-//							for (Iter = value().out_label.begin();
-//									Iter != value().out_label.end(); Iter++) {
-//								if (*Iter == a.id) {
-//									value().out_label.erase(Iter);
-//									break;
-//								}
-//							}
-//						}
-//						broadcast(a);
-//					}
-//				}
-//				vote_to_halt();
-//			}
-//		}
-//	}
 	virtual void compute(MessageContainer & messages) {
-		if (step_num==1||init_bit) {
+		if (step_num() == 1 || init_bit) {
+			if (value().level>= (batch - 1) * BATCH_SIZE+ 1&& value().level <= batch * BATCH_SIZE) {
+			my_Message a;
 			value().init(); //init min path level
-			if (value().level >= (batch - 1) * 1000 + 1
-					&& value().level <= batch * 1000) {
-				my_Message a;
-				a.level = value().level;
-				a.min_level = 0; //0 represent don't have a smaller one
-				a.fwdORbwd = 1;
-				broadcast(a);
-				a.fwdORbwd = 0;
-				broadcast(a);
-			}
-			vote_to_halt();
-		} else {
-			if (value().level < (batch - 1) * 1000 + 1)
-				return; // if it is the last batch's level,return immediately
-			int size = messages.size();
-			vector<VertexID> temp;
-			for (int i = 0; i < size; i++) {
-				my_Message a = messages[i];
-				if ((a.fwdORbwd && value().min_pathIn_level[a.level])
-						|| (!a.fwdORbwd && value().min_pathOut_level))
-					continue; //has be used
-				//				if(a.level<value().level)a.min_level=0;
-				if (a.level < value().level) {
-					if (a.min_level) {
-						if (a.fwdORbwd) {
-							//request get
-							set_union(mir[a.id - batch * 1000].out.begin(),
-									mir[a.id - batch * 1000].out.end(),
-									value().in_label.begin(),
-									value().in_label.end(),
-									inserter(temp, temp.begin()));
-							if (temp.size() == 0) {
-								value().in_label.push_back(a.id);
-							}
-							temp.clear();
-							//value().in_label.push_back(a.level);
-						} else {
-							//requset get
-							set_union(mir[a.id - batch * 1000].in.begin(),
-									mir[a.id - batch * 1000].in.end(),
-									value().out_label.begin(),
-									value().out_label.end(),
-									inserter(temp, temp.begin()));
-							if (temp.size() == 0) {
-								value().out_label.push_back(a.id);
-							}
-							temp.clear();
-							//value().out_label.push_back(a.level);
-						}
-						broadcast(a);
-					} else if (!a.min_level) {
-						vector<VertexID>::iterator Iter;
-						if (a.fwdORbwd) {
-							value().min_pathIn_level[a.id] = 1;
-							for (Iter = value().in_label.begin();
-									Iter != value().in_label.end(); Iter++) {
-								if (*Iter == a.level) {
-									value().in_label.erase(Iter);
-									break;
-								}
-							}
-						} else {
-							value().min_pathOut_level[a.id] = 1; // log that there is a smaller one between this two vertexes
-							for (Iter = value().out_label.begin();
-									Iter != value().out_label.end(); Iter++) {
-								if (*Iter == a.level) {
-									value().out_label.erase(Iter);
-									break;
-								}
-							}
-						}
-						broadcast(a);
-					}
-				} else {
-					a.min_level = 1; // there is a smaller  level in one path.
-					broadcast(a);
-				}
-			}
+			a.id=id;
+			a.level = value().level;
+			a.min_level = 0;//0 represent don't have a smaller one
+			a.fwdORbwd = 1;
+			broadcast(a);
+			a.fwdORbwd = 0;
+			broadcast(a);
 		}
 		vote_to_halt();
+	} else {
+		if (value().level < (batch - 1) * BATCH_SIZE + 1){
+		    vote_to_halt();
+			return;
+		}// if it is the last batch's level,return immediately
+		int size = messages.size();
+		vector<VertexID> temp;
+		for (int i = 0; i < size; i++) {
+			my_Message a = messages[i];
+			if ((a.fwdORbwd && value().min_pathIn_level[a.id])
+					|| ((!a.fwdORbwd) && value().min_pathOut_level[a.id])){
+				broadcast(a);
+				continue; //has be used
+			}
+			if (a.level < value().level) {
+				if (!a.min_level) {
+					if (a.fwdORbwd) {
+						set_union(mir[a.id - (batch-1) * BATCH_SIZE].out.begin(),
+								mir[a.id - (batch-1) * BATCH_SIZE].out.end(),
+								value().in_label.begin(),
+								value().in_label.end(),
+								inserter(temp, temp.begin()));
+						if (temp.size() == 0) {
+							value().in_label.push_back(a.id);
+							value().used_in[a.id]=1;
+						}
+						temp.clear();
+					} else if(!a.fwdORbwd){
+						set_union(mir[a.id - (batch-1) * BATCH_SIZE].in.begin(),
+								mir[a.id - (batch-1) * BATCH_SIZE].in.end(),
+								value().out_label.begin(),
+								value().out_label.end(),
+								inserter(temp, temp.begin()));
+						if (temp.size() == 0) {
+							value().out_label.push_back(a.id);
+							value().used_out[a.id]=1;
+						}
+						temp.clear();
+					}
+					broadcast(a);
+				} else if (a.min_level) {
+					vector<VertexID>::iterator Iter;
+					if (a.fwdORbwd) {
+						value().min_pathIn_level[a.id] = 1;
+						if(value().used_in[a.id])
+						for (Iter = value().in_label.begin();
+								Iter != value().in_label.end(); Iter++) {
+							if (*Iter == a.level) {
+								value().in_label.erase(Iter);
+								break;
+							}
+						}
+					} else {
+						value().min_pathOut_level[a.id] = 1; // log that there is a smaller one between this two vertexes
+						if(value().used_out[a.id])
+						for (Iter = value().out_label.begin();
+								Iter != value().out_label.end(); Iter++) {
+							if (*Iter == a.level) {
+								value().out_label.erase(Iter);
+								break;
+							}
+						}
+					}
+					broadcast(a);
+				}
+			} else {
+				a.min_level = 1; // there is a smaller  level in one path.
+				broadcast(a);
+			}
+		}
+		cout << "***" << endl;
+		vote_to_halt();
+		cout << "***" << endl;
 	}
+}
 };
 
 class CCWorker_pregel: public Worker<CCVertex_pregel> {
@@ -311,17 +203,17 @@ public:
 		char * pch;
 		pch = strtok(line, "\t");
 		CCVertex_pregel* v = new CCVertex_pregel;
-		v->id = atoi(pch);
+		v->id = atoi(pch)-1;
 //		printf("%d	", v->id);
 		pch = strtok(NULL, " ");
-		v->value().level = atoi(pch);
+		v->value().level = atoi(pch)-1;
 //		printf("%d	", v->value().level);
 		pch = strtok(NULL, " ");
 		int num = atoi(pch);
 		for (int i = 0; i < num; i++) {
 			pch = strtok(NULL, " ");
 //			printf("%d	", atoi(pch));
-			v->value().out_neighbor.push_back(atoi(pch));
+			v->value().out_neighbor.push_back(atoi(pch)-1);
 		}
 		pch = strtok(NULL, " ");
 		num = atoi(pch);
@@ -329,7 +221,7 @@ public:
 		for (int i = 0; i < num; i++) {
 			pch = strtok(NULL, " ");
 //			printf("%d	", atoi(pch));
-			v->value().in_neighbor.push_back(atoi(pch));
+			v->value().in_neighbor.push_back(atoi(pch)-1);
 		}
 //		printf("\n");
 		return v;
