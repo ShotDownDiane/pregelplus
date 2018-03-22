@@ -7,7 +7,7 @@
 #include "time.h"
 #include "serialization.h"
 #include "global.h"
-
+#define ST (printf("%s(%d) rank#%d:",_FILE_,_LINE_,_my_rank),printf)
 //============================================
 //Allreduce
 int all_sum(int my_copy) {
@@ -70,13 +70,15 @@ obinstream recv_obinstream(int src) {
 	return obinstream(buf, size);
 }
 template<class T>
-void all_to_all(vector<T> to_exchange,vector<T>& temp) {
+void all_to_all(vector<T>& to_exchange,vector<T>& temp) {
 	StartTimer(COMMUNICATION_TIMER);
 	//for each to_exchange[i]
 	//        send out *to_exchange[i] to i
 	//        save received data in *to_exchange[i]
 	int np = get_num_workers();
 	int me = get_worker_id();
+	ibinstream m;
+	m << to_exchange;
 	vector<T> temp2;
 	for (int i = 0; i < np; i++) {
 		int partner = (i - me + np) % np;
@@ -84,8 +86,6 @@ void all_to_all(vector<T> to_exchange,vector<T>& temp) {
 			if (me < partner) {
 				StartTimer(SERIALIZATION_TIMER);
 				//send
-				ibinstream m;
-				m << to_exchange;
 				StopTimer(SERIALIZATION_TIMER);
 				StartTimer(TRANSFER_TIMER);
 				send_ibinstream(m, partner);
@@ -109,8 +109,6 @@ void all_to_all(vector<T> to_exchange,vector<T>& temp) {
 				temp.insert(temp.end(), temp2.begin(), temp2.end());
 				temp2.clear();
 				//send
-				ibinstream m;
-				m << to_exchange;
 				StopTimer(SERIALIZATION_TIMER);
 				StartTimer(TRANSFER_TIMER);
 				send_ibinstream(m, partner);

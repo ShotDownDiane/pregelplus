@@ -11,14 +11,15 @@
 #include "../utils/Aggregator.h"
 using namespace std;
 #define BATCH_SIZE 4
+#define ST (printf("%s(%d) rank#%d:",_FILE_,_LINE_,_my_rank),printf)
 struct mirror_vertex {
 	int id;
 	vector<VertexID> in;
 	vector<VertexID> out;
 	mirror_vertex& operator=(const  mirror_vertex& v){
 		id=v.id;
-//		in.insert(in.begin(),v.in.begin(),v.in.end());
-//		out.insert(out.begin(),v.out.begin(),v.out.end());
+		in.insert(in.begin(),v.in.begin(),v.in.end());
+		out.insert(out.begin(),v.out.begin(),v.out.end());
 		return *this;
 	}
 } mir[BATCH_SIZE+1];
@@ -33,6 +34,19 @@ obinstream & operator>>(obinstream & m, mirror_vertex & v) {
 	m >> v.in;
 	m >> v.out;
 	return m;
+}
+void init(){
+	for(int i=0;i<BATCH_SIZE+1;i++){
+		mir[i].id=-1;
+	}
+}
+int hashbacket(int id){
+	int myid= id%BATCH_SIZE;
+	while(mir[myid].id!=id&&mir[myid].id!=-1){
+		myid=(myid+1)%BATCH_SIZE;
+	}
+	mir[myid].id=id;
+	return myid;
 }
 int batch;
 bool init_bit;
@@ -89,7 +103,7 @@ public:
 		worker_barrier(); //newly added for ease of multi-job programming in run.cpp
 	}
 
-	//==================================
+	//==================================1
 	//sub-functions
 	void sync_graph() {
 		//ResetTimer(4);
@@ -122,7 +136,7 @@ public:
 
 	//old implementation
 	/*
-	 void active_compute()
+	 void active_compute()1
 	 {
 	 active_count=0;
 	 MessageBufT* mbuf=(MessageBufT*)get_message_buffer();
@@ -396,23 +410,28 @@ public:
 						break; //all_halt AND no_msg
 					}
 					batch++;
+					init();
 					int size = vertexes.size();
 					vector<mirror_vertex>temp;
 					for(int i=0;i<size;i++){
-						if(vertexes[i]->value().level>(batch-1)*BATCH_SIZE&&vertexes[i]->value().level<=(batch)*BATCH_SIZE){
-							temp.push_back({vertexes[i]->id,vertexes[i]->value().in_neighbor,vertexes[i]->value().out_neighbor});
+						if(vertexes[i]->value().level>(batch-1)*BATCH_SIZE-1&&vertexes[i]->value().level<=(batch)*BATCH_SIZE){
+							mirror_vertex a;
+							a.id=vertexes[i]->id;
+							a.in=vertexes[i]->value().in_neighbor;
+							a.out=vertexes[i]->value().out_neighbor;
+							temp.push_back(a);
 						}
 					}
 					vector<mirror_vertex> to_get;
 					all_to_all<mirror_vertex>(temp,to_get);
 					int get_size=to_get.size();
-//					for(int i=0;i<get_size;i++){
-//						cout << to_get[i].id-(batch-1)*BATCH_SIZE-1 << endl;
-//						mir[1]=temp[1];
-//					}
-
-					cout << get_size<<"*"<<to_get[1].id << endl;
-
+					for(int i=0;i<get_size;i++){
+						mir[hashbacket(to_get[i].id)]=to_get[i];
+					}
+					get_size=temp.size();
+					for(int i=0;i<get_size;i++){
+						mir[hashbacket(temp[i].id)]=temp[i];
+					}
 					init_bit = 1;
 				}
 			} else
@@ -423,7 +442,7 @@ public:
 				agg->init();
 			//===================
 			clearBits();
-			if (wakeAll == 1)
+			if (wakeAll == 1|| init_bit)
 				all_compute();
 			else
 				active_compute();
