@@ -15,9 +15,9 @@ struct CCValue_pregel {
 	vector<VertexID> out_label;
 	vector<VertexID> in_respone;
 	vector<VertexID> out_respone;
-	uint64 used_in;
+	uint64 used_in;//bitmap, pre_in_label element
 	uint64 used_out;
-	uint64 min_pathOut_level;
+	uint64 min_pathOut_level;//bitmap, excluded elements of in_label
 	uint64 min_pathIn_level;
 	void init() {
 //		for(int i=0;i<50;i++){
@@ -131,10 +131,11 @@ public:
 		for (int i = 0; i < size; i++) {
 			my_Message a = messages[i];
 			if (a.fwdORbwd && (value().min_pathIn_level&(1<<(hashbacket(a.id)))))
-			{
+			{//exclude pruning
 				continue; //has been handled
 			}
 			if((!a.fwdORbwd) && (value().min_pathOut_level&(1<<(hashbacket(a.id))))){
+				//exclude pruning
 				continue;//has been handled
 			}
 			if (a.level < value().level) {// the source vertext's level is highter than mine
@@ -143,6 +144,7 @@ public:
 //						if(value().used_in&1<<(hashbacket(a.id)))
 //							continue;//has been push in
 						vector<VertexID> temp;
+						//intersection should be (a.id|a.out)&(id|in_label)?
 						set_intersection(mir[hashbacket(a.id)].out.begin(),
 								mir[hashbacket(a.id)].out.end(),
 								value().in_label.begin(),
@@ -150,12 +152,16 @@ public:
 								inserter(temp, temp.begin()));
 						if (temp.size() == 0) {//if empty push in
 //							value().in_label.push_back(a.id);later handle the label,there only update the used arrays
+							//include pruning here, if used_in is 1, no need broadcast anymore. no more than twice bfs
 							value().used_in|=(1<<(hashbacket(a.id)));
+						}else{
+							//pruning process goes here
 						}
 					} else if(!a.fwdORbwd){
 //						if(value().used_out&(1<<(hashbacket(a.id))))
 //							continue;
 						vector<VertexID> temp;
+						//intersection should be (a.id|a.out)&(id|in_label)?
 						set_intersection(mir[hashbacket(a.id)].in.begin(),
 								mir[hashbacket(a.id)].in.end(),
 								value().out_label.begin(),
@@ -163,7 +169,10 @@ public:
 								inserter(temp, temp.begin()));
 						if (temp.size() == 0) {
 //							value().out_label.push_back(a.id);
+							//include pruning here, if used_in is 1, no need broadcast anymore. no more than twice bfs
 							value().used_out|=(1<<(hashbacket(a.id)));
+						}else{
+							//pruning process goes here
 						}
 					}
 					broadcast(a);
@@ -202,6 +211,9 @@ public:
 		vote_to_halt();
 	}
 }
+	void postbatch_compute(){
+		//the update process of label_in and label_out goes here
+	}
 };
 
 class CCWorker_pregel: public Worker<CCVertex_pregel> {
