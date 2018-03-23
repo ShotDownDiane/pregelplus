@@ -1,8 +1,9 @@
 #include "basic/pregel-dev.h"
 #include "utils/type.h"
 #include "basic/Worker.h"
+#include "stdio.h"
 using namespace std;
-
+typedef unsigned long int uint64;
 //input line format: vertexID \t numOfNeighbors neighbor1 neighbor2 ...
 //output line format: v \t min_vertexID(v's connected component)
 
@@ -14,23 +15,27 @@ struct CCValue_pregel {
 	vector<VertexID> out_label;
 	vector<VertexID> in_respone;
 	vector<VertexID> out_respone;
-	bool used_in[50];
-	bool used_out[50];
-	bool min_pathOut_level[50];
-	bool min_pathIn_level[50];
+	uint64 used_in;
+	uint64 used_out;
+	uint64 min_pathOut_level;
+	uint64 min_pathIn_level;
 	void init() {
-		for(int i=0;i<50;i++){
-			used_in[i]=0;
-			used_out[i]=0;
-			min_pathIn_level[i]=0;
-			min_pathOut_level[i]=0;
-		}
+//		for(int i=0;i<50;i++){
+//			used_in[i]=0;
+//			used_out[i]=0;
+//			min_pathIn_level[i]=0;
+//			min_pathOut_level[i]=0;
+//		}
+		used_in=0;
+		used_out=0;
+		min_pathOut_level=0;
+		min_pathIn_level=0;
 	}
 };
 struct my_Message {
 	int id;
 	int level;
-	int min_level;
+	bool min_level;
 	bool fwdORbwd; //ture -> forward and false -> backward
 };
 struct respond_message {
@@ -107,14 +112,13 @@ public:
 		if (step_num() == 1 || init_bit) {
 			value().init(); //init min path level
 			if (value().level>= (batch - 1) * BATCH_SIZE&& value().level <= batch * BATCH_SIZE-1) {
-			cout << id << endl;
 			my_Message a;
 			a.id=id;
 			a.level = value().level;
 			a.min_level = 0;//0 represent don't have a smaller one
-			a.fwdORbwd = 1;
+			a.fwdORbwd = 1;//same with the eage direction
 			broadcast(a);
-			a.fwdORbwd = 0;
+			a.fwdORbwd = 0;//different from the eage direction
 			broadcast(a);
 		}
 		vote_to_halt();
@@ -126,27 +130,31 @@ public:
 		int size = messages.size();
 		for (int i = 0; i < size; i++) {
 			my_Message a = messages[i];
-			if (a.fwdORbwd && value().min_pathIn_level[hashbacket(a.id)])
+			if (a.fwdORbwd && (value().min_pathIn_level&(1<<(hashbacket(a.id)))))
 			{
-				continue; //has be used
+				continue; //has been handled
 			}
-			if((!a.fwdORbwd) && value().min_pathOut_level[hashbacket(a.id)]){
-				continue;
+			if((!a.fwdORbwd) && (value().min_pathOut_level&(1<<(hashbacket(a.id))))){
+				continue;//has been handled
 			}
-			if (a.level < value().level) {
-				if (!a.min_level) {
-					if (a.fwdORbwd) {
+			if (a.level < value().level) {// the source vertext's level is highter than mine
+				if (!a.min_level) {//it doesn't exist a vertex highter than it
+					if (a.fwdORbwd) {//same direction
+//						if(value().used_in&1<<(hashbacket(a.id)))
+//							continue;//has been push in
 						vector<VertexID> temp;
 						set_intersection(mir[hashbacket(a.id)].out.begin(),
 								mir[hashbacket(a.id)].out.end(),
 								value().in_label.begin(),
 								value().in_label.end(),
 								inserter(temp, temp.begin()));
-						if (temp.size() == 0) {
-							value().in_label.push_back(a.id);
-							value().used_in[hashbacket(a.id)]=1;
+						if (temp.size() == 0) {//if empty push in
+//							value().in_label.push_back(a.id);later handle the label,there only update the used arrays
+							value().used_in|=(1<<(hashbacket(a.id)));
 						}
 					} else if(!a.fwdORbwd){
+//						if(value().used_out&(1<<(hashbacket(a.id))))
+//							continue;
 						vector<VertexID> temp;
 						set_intersection(mir[hashbacket(a.id)].in.begin(),
 								mir[hashbacket(a.id)].in.end(),
@@ -154,38 +162,39 @@ public:
 								value().out_label.end(),
 								inserter(temp, temp.begin()));
 						if (temp.size() == 0) {
-							value().out_label.push_back(a.id);
-							value().used_out[hashbacket(a.id)]=1;
+//							value().out_label.push_back(a.id);
+							value().used_out|=(1<<(hashbacket(a.id)));
 						}
 					}
 					broadcast(a);
 				} else if (a.min_level) {
-					vector<VertexID>::iterator Iter;
+//					vector<VertexID>::iterator Iter;
 					if (a.fwdORbwd) {
-						value().min_pathIn_level[hashbacket(a.id)] = 1;
-						if(value().used_in[hashbacket(a.id)])
-						for (Iter = value().in_label.begin();
-								Iter != value().in_label.end(); Iter++) {
-							if (*Iter == a.level) {
-								value().in_label.erase(Iter);
-								break;
-							}
-						}
-					} else {
-						value().min_pathOut_level[hashbacket(a.id)] = 1; // log that there is a smaller one between this two vertexes
-						if(value().used_out[hashbacket(a.id)]){
-							for (Iter = value().out_label.begin();
-									Iter != value().out_label.end(); Iter++) {
-								if (*Iter == a.level) {
-									value().out_label.erase(Iter);
-									break;
-								}
-							}
+						value().min_pathIn_level|=1<<(hashbacket(a.id));
+						if(value().used_in&(1<<hashbacket(a.id)))
+							value().used_in&=~(1<<(hashbacket(a.id)));//set 0
+//						for (Iter = value().in_label.begin();
+//								Iter != value().in_label.end(); Iter++) {
+//							if (*Iter == a.level) {
+//								value().in_label.erase(Iter);
+//								break;
+//							}
+						} else {
+						value().min_pathOut_level|=1<<(hashbacket(a.id)); // log that there is a smaller one between this two vertexes
+						if(value().used_in&(1<<hashbacket(a.id))){
+							value().used_out&=~(1<<(hashbacket(a.id)));// set 0
+//							for (Iter = value().out_label.begin();
+//									Iter != value().out_label.end(); Iter++) {
+//								if (*Iter == a.level) {
+//									value().out_label.erase(Iter);
+//									break;
+//								}
+//							}
 						}
 					}
 					broadcast(a);
 				}
-			} else {
+			}else {
 				a.min_level = 1; // there is a smaller  level in one path.
 				broadcast(a);
 			}
@@ -265,8 +274,8 @@ public:
 //class CCCombiner_pregel: public Combiner<my_Message> {
 //public:
 //	virtual void combine(my_Message & old, const my_Message & new_msg) {
-//		if (old > new_msg)
-//			old = new_msg;
+//		if ((old.id==new_msg.id)&&(new_msg.fwdORbwd=old.fwdORbwd)&&(new_msg.min_level))
+//			old.min_level=1;
 //	}
 //};
 

@@ -17,6 +17,8 @@ struct mirror_vertex {
 	vector<VertexID> in;
 	vector<VertexID> out;
 	mirror_vertex& operator=(const  mirror_vertex& v){
+		in.clear();
+		out.clear();
 		id=v.id;
 		in.insert(in.begin(),v.in.begin(),v.in.end());
 		out.insert(out.begin(),v.out.begin(),v.out.end());
@@ -410,15 +412,26 @@ public:
 						break; //all_halt AND no_msg
 					}
 					batch++;
-					init();
 					int size = vertexes.size();
+					for(int i=0;i<size;i++){
+						for(int j=0;j<BATCH_SIZE;j++){
+							if(vertexes[i]->value().used_in&(1<<j)){
+								vertexes[i]->value().in_label.push_back(mir[j].id);
+							}
+							if(vertexes[i]->value().used_out&(1<<j)){
+								vertexes[i]->value().out_label.push_back(mir[j].id);
+							}
+						}
+					}
+					init();
 					vector<mirror_vertex>temp;
 					for(int i=0;i<size;i++){
+						//handle the label
 						if(vertexes[i]->value().level>(batch-1)*BATCH_SIZE-1&&vertexes[i]->value().level<=(batch)*BATCH_SIZE){
 							mirror_vertex a;
 							a.id=vertexes[i]->id;
-							a.in=vertexes[i]->value().in_neighbor;
-							a.out=vertexes[i]->value().out_neighbor;
+							a.in=vertexes[i]->value().in_label;
+							a.out=vertexes[i]->value().out_label;
 							temp.push_back(a);
 						}
 					}
@@ -442,7 +455,7 @@ public:
 				agg->init();
 			//===================
 			clearBits();
-			if (wakeAll == 1|| init_bit)
+			if (wakeAll == 1||init_bit==1)
 				all_compute();
 			else
 				active_compute();
