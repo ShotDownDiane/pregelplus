@@ -1,0 +1,6 @@
+Debug
+Release
+.*project
+*.log
+output
+ydhdfs.h
