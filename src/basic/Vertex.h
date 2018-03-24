@@ -50,6 +50,7 @@ public:
     }
 
     virtual void compute(MessageContainer& messages) = 0;
+    virtual void postbatch_compute() = 0;
     inline ValueT& value()
     {
         return _value;

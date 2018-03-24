@@ -138,62 +138,6 @@ public:
 	}
 	;
 
-	//old implementation
-	/*
-	 void active_compute()1
-	 {
-	 active_count=0;
-	 MessageBufT* mbuf=(MessageBufT*)get_message_buffer();
-	 Map & msgs=mbuf->get_messages();
-	 MessageContainerT empty;
-	 for(VertexIter it=vertexes.begin(); it!=vertexes.end(); it++)
-	 {
-	 KeyT vid=(*it)->id;
-	 MapIter mit=msgs.find(vid);
-	 if(mit->second->size()==0)
-	 {
-	 if((*it)->is_active())
-	 {
-	 (*it)->compute(empty);
-	 AggregatorT* agg=(AggregatorT*)get_aggregator();
-	 if(agg!=NULL) agg->stepPartial(*it);
-	 if((*it)->is_active()) active_count++;
-	 }
-	 }
-	 else
-	 {
-	 (*it)->activate();
-	 (*it)->compute(*(mit->second));
-	 mit->second->clear();//clear used msgs
-	 AggregatorT* agg=(AggregatorT*)get_aggregator();
-	 if(agg!=NULL) agg->stepPartial(*it);
-	 if((*it)->is_active()) active_count++;
-	 }
-	 }
-	 }
-
-	 void all_compute()
-	 {
-	 active_count=0;
-	 MessageBufT* mbuf=(MessageBufT*)get_message_buffer();
-	 Map & msgs=mbuf->get_messages();
-	 MessageContainerT empty;
-	 for(VertexIter it=vertexes.begin(); it!=vertexes.end(); it++)
-	 {
-	 KeyT vid=(*it)->id;
-	 MapIter mit=msgs.find(vid);
-	 (*it)->activate();
-	 if(mit->second->size()==0) (*it)->compute(empty);
-	 else{
-	 (*it)->compute(*(mit->second));
-	 mit->second->clear();//clear used msgs
-	 }
-	 AggregatorT* agg=(AggregatorT*)get_aggregator();
-	 if(agg!=NULL) agg->stepPartial(*it);
-	 if((*it)->is_active()) active_count++;
-	 }
-	 }
-	 */
 
 	void active_compute() {
 		active_count = 0;
@@ -236,6 +180,50 @@ public:
 			if (vertexes[i]->is_active())
 				active_count++;
 		}
+	}
+
+	void postbatch(){
+		//postbatch process of each vertex
+		for (int i = 0; i < vertexes.size(); i++) {
+			vertexes[i]->postbatch_compute();
+		}
+
+
+		//consider move label_in(out) postbatch_process to vertex.postbatch_compute
+		int size = vertexes.size();
+		for(int i=0;i<size;i++){
+			for(int j=0;j<BATCH_SIZE;j++){
+				if(vertexes[i]->value().used_in[j/64]&(1<<(j%64))){
+					vertexes[i]->value().in_label.push_back(mir[j].id);
+				}
+				if(vertexes[i]->value().used_out[j/64]&(1<<(j%64))){
+					vertexes[i]->value().out_label.push_back(mir[j].id);
+				}
+			}
+		}
+		init();
+		vector<mirror_vertex>temp;
+		for(int i=0;i<size;i++){
+			//handle the label
+			if(vertexes[i]->value().level>(batch-1)*BATCH_SIZE-1&&vertexes[i]->value().level<=(batch)*BATCH_SIZE){
+				mirror_vertex a;
+				a.id=vertexes[i]->value().level;
+				a.in=vertexes[i]->value().in_label;
+				a.out=vertexes[i]->value().out_label;
+				temp.push_back(a);
+			}
+		}
+		vector<mirror_vertex> to_get;
+		all_to_all<mirror_vertex>(temp,to_get);
+		int get_size=to_get.size();
+		for(int i=0;i<get_size;i++){
+			mir[hashbacket(to_get[i].id)]=to_get[i];
+		}
+		get_size=temp.size();
+		for(int i=0;i<get_size;i++){
+			mir[hashbacket(temp[i].id)]=temp[i];
+		}
+
 	}
 
 	inline void add_vertex(VertexT* vertex) {
@@ -414,40 +402,9 @@ public:
 						break; //all_halt AND no_msg
 					}
 					batch++;
-					int size = vertexes.size();
-					for(int i=0;i<size;i++){
-						for(int j=0;j<BATCH_SIZE;j++){
-							if(vertexes[i]->value().used_in[j/64]&(1<<(j%64))){
-								vertexes[i]->value().in_label.push_back(mir[j].id);
-							}
-							if(vertexes[i]->value().used_out[j/64]&(1<<(j%64))){
-								vertexes[i]->value().out_label.push_back(mir[j].id);
-							}
-						}
-					}
-					init();
-					vector<mirror_vertex>temp;
-					for(int i=0;i<size;i++){
-						//handle the label
-						if(vertexes[i]->value().level>(batch-1)*BATCH_SIZE-1&&vertexes[i]->value().level<=(batch)*BATCH_SIZE){
-							mirror_vertex a;
-							a.id=vertexes[i]->value().level;
-							a.in=vertexes[i]->value().in_label;
-							a.out=vertexes[i]->value().out_label;
-							temp.push_back(a);
-						}
-					}
-					vector<mirror_vertex> to_get;
-					all_to_all<mirror_vertex>(temp,to_get);
-					int get_size=to_get.size();
-					for(int i=0;i<get_size;i++){
-						mir[hashbacket(to_get[i].id)]=to_get[i];
-					}
-					get_size=temp.size();
-					for(int i=0;i<get_size;i++){
-						mir[hashbacket(temp[i].id)]=temp[i];
-					}
+					postbatch();//consider move the following code to postbatch compute
 					init_bit = 1;
+					active_vnum() = get_vnum();
 				}
 			} else
 				active_vnum() = get_vnum();
@@ -500,444 +457,6 @@ public:
 		StopTimer(WORKER_TIMER);
 		PrintTimer("Dump Time", WORKER_TIMER);
 	}
-
-	//run the worker
-	void run(const WorkerParams& params, int num_phases) {
-		//check path + init
-		if (_my_rank == MASTER_RANK) {
-			if (dirCheck(params.input_path.c_str(), params.output_path.c_str(),
-					_my_rank == MASTER_RANK, params.force_write) == -1)
-				exit(-1);
-		}
-		init_timers();
-
-		//dispatch splits
-		ResetTimer(WORKER_TIMER);
-		vector<vector<string> >* arrangement;
-		if (_my_rank == MASTER_RANK) {
-			arrangement =
-					params.native_dispatcher ?
-							dispatchLocality(params.input_path.c_str()) :
-							dispatchRan(params.input_path.c_str());
-			//reportAssignment(arrangement);//DEBUG !!!!!!!!!!
-			masterScatter(*arrangement);
-			vector<string>& assignedSplits = (*arrangement)[0];
-			//reading assigned splits (map)
-			for (vector<string>::iterator it = assignedSplits.begin();
-					it != assignedSplits.end(); it++)
-				load_graph(it->c_str());
-			delete arrangement;
-		} else {
-			vector<string> assignedSplits;
-			slaveScatter(assignedSplits);
-			//reading assigned splits (map)
-			for (vector<string>::iterator it = assignedSplits.begin();
-					it != assignedSplits.end(); it++)
-				load_graph(it->c_str());
-		}
-
-		//send vertices according to hash_id (reduce)
-		sync_graph();
-		message_buffer->init(vertexes);
-		//barrier for data loading
-		worker_barrier(); //@@@@@@@@@@@@@
-		StopTimer(WORKER_TIMER);
-		PrintTimer("Load Time", WORKER_TIMER);
-
-		//=========================================================
-
-		init_timers();
-		ResetTimer(WORKER_TIMER);
-
-		for (global_phase_num = 1; global_phase_num <= num_phases;
-				global_phase_num++) {
-			if (_my_rank == MASTER_RANK)
-				cout << "################ Phase " << global_phase_num
-						<< " ################" << endl;
-
-			//supersteps
-			global_step_num = 0;
-			long long step_msg_num;
-			long long step_vadd_num;
-			long long global_msg_num = 0;
-			long long global_vadd_num = 0;
-
-			while (true) {
-				global_step_num++;
-				ResetTimer(4);
-				//===================
-				if (step_num() == 1) {
-					get_vnum() = all_sum(vertexes.size());
-					if (phase_num() > 1)
-						active_vnum() = get_vnum();
-					else
-						active_vnum() = all_sum(active_count);
-					//===================
-					AggregatorT* agg = (AggregatorT*) get_aggregator();
-					if (agg != NULL)
-						agg->init();
-					//===================
-					clearBits();
-					if (phase_num() > 1)
-						all_compute();
-					else
-						active_compute();
-					message_buffer->combine();
-					step_msg_num = master_sum_LL(
-							message_buffer->get_total_msg());
-					step_vadd_num = master_sum_LL(
-							message_buffer->get_total_vadd());
-					if (_my_rank == MASTER_RANK) {
-						global_msg_num += step_msg_num;
-						global_vadd_num += step_vadd_num;
-					}
-					vector<VertexT*>& to_add = message_buffer->sync_messages();
-					agg_sync();
-					for (int i = 0; i < to_add.size(); i++)
-						add_vertex(to_add[i]);
-					to_add.clear();
-				} else {
-					char bits_bor = all_bor(global_bor_bitmap);
-					if (getBit(FORCE_TERMINATE_ORBIT, bits_bor) == 1)
-						break;
-					get_vnum() = all_sum(vertexes.size());
-					int wakeAll = getBit(WAKE_ALL_ORBIT, bits_bor);
-					if (wakeAll == 0) {
-						active_vnum() = all_sum(active_count);
-						if (active_vnum() == 0
-								&& getBit(HAS_MSG_ORBIT, bits_bor) == 0)
-							break; //all_halt AND no_msg
-					} else
-						active_vnum() = get_vnum();
-					//===================
-					AggregatorT* agg = (AggregatorT*) get_aggregator();
-					if (agg != NULL)
-						agg->init();
-					//===================
-					clearBits();
-					if (wakeAll == 1)
-						all_compute();
-					else if (phase_num() > 1 && step_num() == 1)
-						all_compute();
-					else
-						active_compute();
-					message_buffer->combine();
-					step_msg_num = master_sum_LL(
-							message_buffer->get_total_msg());
-					step_vadd_num = master_sum_LL(
-							message_buffer->get_total_vadd());
-					if (_my_rank == MASTER_RANK) {
-						global_msg_num += step_msg_num;
-						global_vadd_num += step_vadd_num;
-					}
-					vector<VertexT*>& to_add = message_buffer->sync_messages();
-					agg_sync();
-					for (int i = 0; i < to_add.size(); i++)
-						add_vertex(to_add[i]);
-					to_add.clear();
-				}
-				//===================
-				worker_barrier();
-				StopTimer(4);
-				if (_my_rank == MASTER_RANK) {
-					cout << "Superstep " << global_step_num
-							<< " done. Time elapsed: " << get_timer(4)
-							<< " seconds" << endl;
-					cout << "#msgs: " << step_msg_num << ", #vadd: "
-							<< step_vadd_num << endl;
-				}
-			}
-			if (_my_rank == MASTER_RANK) {
-				cout << "************ Phase " << global_phase_num
-						<< " done. ************" << endl;
-				cout << "Total #msgs=" << global_msg_num << ", Total #vadd="
-						<< global_vadd_num << endl;
-			}
-		}
-		worker_barrier();
-		StopTimer(WORKER_TIMER);
-		PrintTimer("Communication Time", COMMUNICATION_TIMER);
-		PrintTimer("- Serialization Time", SERIALIZATION_TIMER);
-		PrintTimer("- Transfer Time", TRANSFER_TIMER);
-		PrintTimer("Total Computational Time", WORKER_TIMER);
-
-		// dump graph
-		ResetTimer(WORKER_TIMER);
-		dump_partition(params.output_path.c_str());
-		worker_barrier();
-		StopTimer(WORKER_TIMER);
-		PrintTimer("Dump Time", WORKER_TIMER);
-	}
-
-	// run the worker
-	void run(const MultiInputParams& params) {
-		//check path + init
-		if (_my_rank == MASTER_RANK) {
-			if (dirCheck(params.input_paths, params.output_path.c_str(),
-					_my_rank == MASTER_RANK, params.force_write) == -1)
-				exit(-1);
-		}
-		init_timers();
-
-		//dispatch splits
-		ResetTimer(WORKER_TIMER);
-		vector<vector<string> >* arrangement;
-		if (_my_rank == MASTER_RANK) {
-			arrangement =
-					params.native_dispatcher ?
-							dispatchLocality(params.input_paths) :
-							dispatchRan(params.input_paths);
-			//reportAssignment(arrangement);//DEBUG !!!!!!!!!!
-			masterScatter(*arrangement);
-			vector<string>& assignedSplits = (*arrangement)[0];
-			//reading assigned splits (map)
-			for (vector<string>::iterator it = assignedSplits.begin();
-					it != assignedSplits.end(); it++)
-				load_graph(it->c_str());
-			delete arrangement;
-		} else {
-			vector<string> assignedSplits;
-			slaveScatter(assignedSplits);
-			//reading assigned splits (map)
-			for (vector<string>::iterator it = assignedSplits.begin();
-					it != assignedSplits.end(); it++)
-				load_graph(it->c_str());
-		}
-
-		//send vertices according to hash_id (reduce)
-		sync_graph();
-		message_buffer->init(vertexes);
-		//barrier for data loading
-		worker_barrier(); //@@@@@@@@@@@@@
-		StopTimer(WORKER_TIMER);
-		PrintTimer("Load Time", WORKER_TIMER);
-
-		//=========================================================
-
-		init_timers();
-		ResetTimer(WORKER_TIMER);
-		//supersteps
-		global_step_num = 0;
-		long long step_msg_num;
-		long long step_vadd_num;
-		long long global_msg_num = 0;
-		long long global_vadd_num = 0;
-		while (true) {
-			global_step_num++;
-			ResetTimer(4);
-			//===================
-			char bits_bor = all_bor(global_bor_bitmap);
-			if (getBit(FORCE_TERMINATE_ORBIT, bits_bor) == 1)
-				break;
-			get_vnum() = all_sum(vertexes.size());
-			int wakeAll = getBit(WAKE_ALL_ORBIT, bits_bor);
-			if (wakeAll == 0) {
-				active_vnum() = all_sum(active_count);
-				if (active_vnum() == 0 && getBit(HAS_MSG_ORBIT, bits_bor) == 0)
-					break; //all_halt AND no_msg
-			} else
-				active_vnum() = get_vnum();
-			//===================
-			AggregatorT* agg = (AggregatorT*) get_aggregator();
-			if (agg != NULL)
-				agg->init();
-			//===================
-			clearBits();
-			if (wakeAll == 1)
-				all_compute();
-			else
-				active_compute();
-			message_buffer->combine();
-			step_msg_num = master_sum_LL(message_buffer->get_total_msg());
-			step_vadd_num = master_sum_LL(message_buffer->get_total_vadd());
-			if (_my_rank == MASTER_RANK) {
-				global_msg_num += step_msg_num;
-				global_vadd_num += step_vadd_num;
-			}
-			vector<VertexT*>& to_add = message_buffer->sync_messages();
-			agg_sync();
-			for (int i = 0; i < to_add.size(); i++)
-				add_vertex(to_add[i]);
-			to_add.clear();
-			//===================
-			worker_barrier();
-			StopTimer(4);
-			if (_my_rank == MASTER_RANK) {
-				cout << "Superstep " << global_step_num
-						<< " done. Time elapsed: " << get_timer(4) << " seconds"
-						<< endl;
-				cout << "#msgs: " << step_msg_num << ", #vadd: "
-						<< step_vadd_num << endl;
-			}
-		}
-		worker_barrier();
-		StopTimer(WORKER_TIMER);
-		PrintTimer("Communication Time", COMMUNICATION_TIMER);
-		PrintTimer("- Serialization Time", SERIALIZATION_TIMER);
-		PrintTimer("- Transfer Time", TRANSFER_TIMER);
-		PrintTimer("Total Computational Time", WORKER_TIMER);
-		if (_my_rank == MASTER_RANK)
-			cout << "Total #msgs=" << global_msg_num << ", Total #vadd="
-					<< global_vadd_num << endl;
-
-		// dump graph
-		ResetTimer(WORKER_TIMER);
-		dump_partition(params.output_path.c_str());
-		worker_barrier();
-		StopTimer(WORKER_TIMER);
-		PrintTimer("Dump Time", WORKER_TIMER);
-	}
-
-	//========================== reports machine-level msg# ===============================
-	void run_report(const WorkerParams& params, const string reportPath) {
-		//check path + init
-		if (_my_rank == MASTER_RANK) {
-			if (dirCheck(params.input_path.c_str(), params.output_path.c_str(),
-					_my_rank == MASTER_RANK, params.force_write) == -1)
-				exit(-1);
-		}
-		init_timers();
-
-		//dispatch splits
-		ResetTimer(WORKER_TIMER);
-		vector<vector<string> >* arrangement;
-		if (_my_rank == MASTER_RANK) {
-			arrangement =
-					params.native_dispatcher ?
-							dispatchLocality(params.input_path.c_str()) :
-							dispatchRan(params.input_path.c_str());
-			//reportAssignment(arrangement);//DEBUG !!!!!!!!!!
-			masterScatter(*arrangement);
-			vector<string>& assignedSplits = (*arrangement)[0];
-			//reading assigned splits (map)
-			for (vector<string>::iterator it = assignedSplits.begin();
-					it != assignedSplits.end(); it++)
-				load_graph(it->c_str());
-			delete arrangement;
-		} else {
-			vector<string> assignedSplits;
-			slaveScatter(assignedSplits);
-			//reading assigned splits (map)
-			for (vector<string>::iterator it = assignedSplits.begin();
-					it != assignedSplits.end(); it++)
-				load_graph(it->c_str());
-		}
-
-		//send vertices according to hash_id (reduce)
-		sync_graph();
-		message_buffer->init(vertexes);
-		//barrier for data loading
-		worker_barrier(); //@@@@@@@@@@@@@
-		StopTimer(WORKER_TIMER);
-		PrintTimer("Load Time", WORKER_TIMER);
-
-		//=========================================================
-		vector<int> msgNumVec; //$$$$$$$$$$$$$$$$$$$$ added for per-worker msg counting
-
-		init_timers();
-		ResetTimer(WORKER_TIMER);
-		//supersteps
-		global_step_num = 0;
-		long long step_msg_num;
-		long long step_vadd_num;
-		long long global_msg_num = 0;
-		long long global_vadd_num = 0;
-		while (true) {
-			global_step_num++;
-			ResetTimer(4);
-			//===================
-			char bits_bor = all_bor(global_bor_bitmap);
-			if (getBit(FORCE_TERMINATE_ORBIT, bits_bor) == 1)
-				break;
-			get_vnum() = all_sum(vertexes.size());
-			int wakeAll = getBit(WAKE_ALL_ORBIT, bits_bor);
-			if (wakeAll == 0) {
-				active_vnum() = all_sum(active_count);
-				if (active_vnum() == 0 && getBit(HAS_MSG_ORBIT, bits_bor) == 0)
-					break; //all_halt AND no_msg
-			} else
-				active_vnum() = get_vnum();
-			//===================
-			AggregatorT* agg = (AggregatorT*) get_aggregator();
-			if (agg != NULL)
-				agg->init();
-			//===================
-			clearBits();
-			if (wakeAll == 1)
-				all_compute();
-			else
-				active_compute();
-			message_buffer->combine();
-			int my_msg_num = message_buffer->get_total_msg(); //$$$$$$$$$$$$$$$$$$$$ added for per-worker msg counting
-			msgNumVec.push_back(my_msg_num); //$$$$$$$$$$$$$$$$$$$$ added for per-worker msg counting
-			step_msg_num = master_sum_LL(my_msg_num); //$$$$$$$$$$$$$$$$$$$$ added for per-worker msg counting
-			step_vadd_num = master_sum_LL(message_buffer->get_total_vadd());
-			if (_my_rank == MASTER_RANK) {
-				global_msg_num += step_msg_num;
-				global_vadd_num += step_vadd_num;
-			}
-			vector<VertexT*>& to_add = message_buffer->sync_messages();
-			agg_sync();
-			for (int i = 0; i < to_add.size(); i++)
-				add_vertex(to_add[i]);
-			to_add.clear();
-			//===================
-			worker_barrier();
-			StopTimer(4);
-			if (_my_rank == MASTER_RANK) {
-				cout << "Superstep " << global_step_num
-						<< " done. Time elapsed: " << get_timer(4) << " seconds"
-						<< endl;
-				cout << "#msgs: " << step_msg_num << ", #vadd: "
-						<< step_vadd_num << endl;
-			}
-		}
-		worker_barrier();
-		StopTimer(WORKER_TIMER);
-		PrintTimer("Communication Time", COMMUNICATION_TIMER);
-		PrintTimer("- Serialization Time", SERIALIZATION_TIMER);
-		PrintTimer("- Transfer Time", TRANSFER_TIMER);
-		PrintTimer("Total Computational Time", WORKER_TIMER);
-		if (_my_rank == MASTER_RANK)
-			cout << "Total #msgs=" << global_msg_num << ", Total #vadd="
-					<< global_vadd_num << endl;
-
-		// dump graph
-		ResetTimer(WORKER_TIMER);
-		dump_partition(params.output_path.c_str());
-
-		StopTimer(WORKER_TIMER);
-		PrintTimer("Dump Time", WORKER_TIMER);
-
-		//dump report
-		if (_my_rank != MASTER_RANK) {
-			slaveGather(msgNumVec);
-		} else {
-			vector<vector<int> > report(_num_workers);
-			masterGather(report);
-			report[MASTER_RANK].swap(msgNumVec);
-			//////
-			//per line per worker: #msg for step1, #msg for step2, ...
-			hdfsFS fs = getHdfsFS();
-			hdfsFile out = getWHandle(reportPath.c_str(), fs);
-			char buffer[100];
-			for (int i = 0; i < _num_workers; i++) {
-				for (int j = 0; j < report[i].size(); j++) {
-					sprintf(buffer, "%d ", report[i][j]);
-					hdfsWrite(fs, out, (void*) buffer, strlen(buffer));
-				}
-				sprintf(buffer, "\n");
-				hdfsWrite(fs, out, (void*) buffer, strlen(buffer));
-			}
-			if (hdfsFlush(fs, out)) {
-				fprintf(stderr, "Failed to 'flush' %s\n", reportPath.c_str());
-				exit(-1);
-			}
-			hdfsCloseFile(fs, out);
-			hdfsDisconnect(fs);
-		}
-	}
-
 
 private:
 	HashT hash;
