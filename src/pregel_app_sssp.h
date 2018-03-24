@@ -13,12 +13,10 @@ struct CCValue_pregel {
 	vector<VertexID> out_neighbor;
 	vector<VertexID> in_label;
 	vector<VertexID> out_label;
-	vector<VertexID> in_respone;
-	vector<VertexID> out_respone;
-	uint64 used_in;
-	uint64 used_out;
-	uint64 min_pathOut_level;
-	uint64 min_pathIn_level;
+	vector<uint64> used_in;
+	vector<uint64> used_out;
+	vector<uint64> min_pathOut_level;
+	vector<uint64> min_pathIn_level;
 	void init() {
 //		for(int i=0;i<50;i++){
 //			used_in[i]=0;
@@ -26,10 +24,26 @@ struct CCValue_pregel {
 //			min_pathIn_level[i]=0;
 //			min_pathOut_level[i]=0;
 //		}
-		used_in=0;
-		used_out=0;
-		min_pathOut_level=0;
-		min_pathIn_level=0;
+		int i=used_in.size();
+		if(i==0){
+			used_in.push_back(0);
+			used_out.push_back(0);
+			min_pathOut_level.push_back(0);
+			min_pathIn_level.push_back(0);
+		}else{
+			for(int j=0;j<i;j++){
+				used_in[j]=0;
+				used_out[j]=0;
+				min_pathOut_level[j]=0;
+				min_pathIn_level[j]=0;
+			}
+		}
+		if(BATCH_SIZE*batch/64>i){
+			used_in.push_back(0);
+			used_out.push_back(0);
+			min_pathOut_level.push_back(0);
+			min_pathIn_level.push_back(0);
+		}
 	}
 };
 struct my_Message {
@@ -91,7 +105,23 @@ obinstream & operator>>(obinstream & m, respond_message & v) {
 	m >> v.out;
 	return m;
 }
-
+bool set_intersection(vector<VertexID>& a,vector<VertexID>& b){
+	int size_a=a.size();
+	int size_b=b.size();
+	if(size_a+size_b>get_vnum())return false;
+	int size_1=0;
+	int size_2=0;
+	while(size_1<size_a&&size_2<size_b){
+		if(a[size_1]<b[size_2]){
+			size_1++;
+		}else if(a[size_1]>b[size_2]){
+			size_2++;
+		}else{
+			return false;
+		}
+	}
+	return true;
+}
 //====================================
 class CCVertex_pregel: public Vertex<VertexID, CCValue_pregel, my_Message> {
 public:
@@ -130,11 +160,11 @@ public:
 		int size = messages.size();
 		for (int i = 0; i < size; i++) {
 			my_Message a = messages[i];
-			if (a.fwdORbwd && (value().min_pathIn_level&(1<<(hashbacket(a.id)))))
+			if (a.fwdORbwd && (value().min_pathIn_level[a.level/64]&(1<<(hashbacket(a.level)-(a.level/64)*64))))
 			{
 				continue; //has been handled
 			}
-			if((!a.fwdORbwd) && (value().min_pathOut_level&(1<<(hashbacket(a.id))))){
+			if((!a.fwdORbwd) && (value().min_pathOut_level[a.level/64]&(1<<(hashbacket(a.level)-(a.level/64)*64)))){
 				continue;//has been handled
 			}
 			if (a.level < value().level) {// the source vertext's level is highter than mine
@@ -142,37 +172,37 @@ public:
 					if (a.fwdORbwd) {//same direction
 //						if(value().used_in&1<<(hashbacket(a.id)))
 //							continue;//has been push in
-						vector<VertexID> temp;
-						set_intersection(mir[hashbacket(a.id)].out.begin(),
-								mir[hashbacket(a.id)].out.end(),
-								value().in_label.begin(),
-								value().in_label.end(),
-								inserter(temp, temp.begin()));
-						if (temp.size() == 0) {//if empty push in
+//						vector<VertexID> temp;
+//						set_intersection(mir[hashbacket(a.level)].out.begin(),
+//								mir[hashbacket(a.level)].out.end(),
+//								value().in_label.begin(),
+//								value().in_label.end(),
+//								inserter(temp, temp.begin()));
+						if (set_intersection(mir[hashbacket(a.level)].out,value().in_label)) {//if empty push in
 //							value().in_label.push_back(a.id);later handle the label,there only update the used arrays
-							value().used_in|=(1<<(hashbacket(a.id)));
+							value().used_in[a.level/64]|=(1<<(hashbacket(a.level)-(a.level/64)*64));
 						}
 					} else if(!a.fwdORbwd){
 //						if(value().used_out&(1<<(hashbacket(a.id))))
 //							continue;
-						vector<VertexID> temp;
-						set_intersection(mir[hashbacket(a.id)].in.begin(),
-								mir[hashbacket(a.id)].in.end(),
-								value().out_label.begin(),
-								value().out_label.end(),
-								inserter(temp, temp.begin()));
-						if (temp.size() == 0) {
+//						vector<VertexID> temp;
+//						set_intersection(mir[hashbacket(a.level)].in.begin(),
+//								mir[hashbacket(a.level)].in.end(),
+//								value().out_label.begin(),
+//								value().out_label.end(),
+//								inserter(temp, temp.begin()));
+						if (set_intersection(mir[hashbacket(a.level)].in,value().out_label)) {
 //							value().out_label.push_back(a.id);
-							value().used_out|=(1<<(hashbacket(a.id)));
+							value().used_out[a.level/64]|=(1<<(hashbacket(a.level)-(a.level/64)*64));
 						}
 					}
 					broadcast(a);
 				} else if (a.min_level) {
 //					vector<VertexID>::iterator Iter;
 					if (a.fwdORbwd) {
-						value().min_pathIn_level|=1<<(hashbacket(a.id));
-						if(value().used_in&(1<<hashbacket(a.id)))
-							value().used_in&=~(1<<(hashbacket(a.id)));//set 0
+						value().min_pathIn_level[a.level/64]|=1<<(hashbacket(a.level)-(a.level/64)*64);
+						if(value().used_in[a.level/64]&(1<<(hashbacket(a.level)-(a.level/64)*64)))
+							value().used_in[a.level/64]&=~(1<<(hashbacket(a.level)-(a.level/64)*64));//set 0
 //						for (Iter = value().in_label.begin();
 //								Iter != value().in_label.end(); Iter++) {
 //							if (*Iter == a.level) {
@@ -180,9 +210,9 @@ public:
 //								break;
 //							}
 						} else {
-						value().min_pathOut_level|=1<<(hashbacket(a.id)); // log that there is a smaller one between this two vertexes
-						if(value().used_in&(1<<hashbacket(a.id))){
-							value().used_out&=~(1<<(hashbacket(a.id)));// set 0
+						value().min_pathOut_level[a.level/64]|=1<<(hashbacket(a.level)-(a.level/64)*64); // log that there is a smaller one between this two vertexes
+						if(value().used_in[a.level/64]&(1<<(hashbacket(a.level)-(a.level/64)*64))){
+							value().used_out[a.level/64]&=~(1<<(hashbacket(a.level)-(a.level/64)*64));// set 0
 //							for (Iter = value().out_label.begin();
 //									Iter != value().out_label.end(); Iter++) {
 //								if (*Iter == a.level) {
@@ -242,10 +272,11 @@ public:
 //		printf("%d\n\t", v->id);
 		j += sprintf(buf + j, "in_label:");
 //		printf("in_label:");
-		sort(v->value().in_label.begin(), v->value().in_label.end());
-		vector<VertexID>::iterator iter = unique(v->value().in_label.begin(),
-				v->value().in_label.end());
-		v->value().in_label.erase(iter, v->value().in_label.end());
+//		sort(v->value().in_label.begin(), v->value().in_label.end());
+//		vector<VertexID>::iterator iter = unique(v->value().in_label.begin(),
+//				v->value().in_label.end());
+//		v->value().in_label.erase(iter, v->value().in_label.end());
+		vector<VertexID>::iterator iter;
 		for (iter = v->value().in_label.begin();
 				iter != v->value().in_label.end(); iter++) {
 			j += sprintf(buf + j, "%d ", *iter);
@@ -254,9 +285,9 @@ public:
 		j += sprintf(buf + j, "\n");
 		j += sprintf(buf + j, "out_label:");
 //		printf("/n/t out_label:");
-		sort(v->value().out_label.begin(), v->value().out_label.end());
-		iter = unique(v->value().out_label.begin(), v->value().out_label.end());
-		v->value().out_label.erase(iter, v->value().out_label.end());
+//		sort(v->value().out_label.begin(), v->value().out_label.end());
+//		iter = unique(v->value().out_label.begin(), v->value().out_label.end());
+//		v->value().out_label.erase(iter, v->value().out_label.end());
 		for (iter = v->value().out_label.begin();
 				iter != v->value().out_label.end(); iter++) {
 			j += sprintf(buf + j, "%d ", *iter);

@@ -24,7 +24,8 @@ struct mirror_vertex {
 		out.insert(out.begin(),v.out.begin(),v.out.end());
 		return *this;
 	}
-} mir[BATCH_SIZE+1];
+};
+vector<mirror_vertex> mir;
 ibinstream & operator<<(ibinstream & m, const mirror_vertex & v) {
 	m << v.id;
 	m << v.in;
@@ -37,20 +38,21 @@ obinstream & operator>>(obinstream & m, mirror_vertex & v) {
 	m >> v.out;
 	return m;
 }
+int batch;
 void init(){
-	for(int i=0;i<BATCH_SIZE+1;i++){
+	mir.resize(BATCH_SIZE*batch+1);
+	for(int i=0;i<BATCH_SIZE*batch+1;i++){
 		mir[i].id=-1;
 	}
 }
 int hashbacket(int id){
 	int myid= id%BATCH_SIZE;
-	while(mir[myid].id!=id&&mir[myid].id!=-1){
-		myid=(myid+1)%BATCH_SIZE;
-	}
+//	while(mir[myid].id!=id&&mir[myid].id!=-1){
+//		myid=(myid+1)%BATCH_SIZE;
+//	}
 	mir[myid].id=id;
 	return myid;
 }
-int batch;
 bool init_bit;
 template<class VertexT, class AggregatorT = DummyAgg> //user-defined VertexT
 class Worker {
@@ -415,10 +417,10 @@ public:
 					int size = vertexes.size();
 					for(int i=0;i<size;i++){
 						for(int j=0;j<BATCH_SIZE;j++){
-							if(vertexes[i]->value().used_in&(1<<j)){
+							if(vertexes[i]->value().used_in[j/64]&(1<<(j%64))){
 								vertexes[i]->value().in_label.push_back(mir[j].id);
 							}
-							if(vertexes[i]->value().used_out&(1<<j)){
+							if(vertexes[i]->value().used_out[j/64]&(1<<(j%64))){
 								vertexes[i]->value().out_label.push_back(mir[j].id);
 							}
 						}
@@ -429,7 +431,7 @@ public:
 						//handle the label
 						if(vertexes[i]->value().level>(batch-1)*BATCH_SIZE-1&&vertexes[i]->value().level<=(batch)*BATCH_SIZE){
 							mirror_vertex a;
-							a.id=vertexes[i]->id;
+							a.id=vertexes[i]->value().level;
 							a.in=vertexes[i]->value().in_label;
 							a.out=vertexes[i]->value().out_label;
 							temp.push_back(a);
