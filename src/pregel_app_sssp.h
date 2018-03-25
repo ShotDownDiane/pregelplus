@@ -38,7 +38,7 @@ struct CCValue_pregel {
 				min_pathIn_level[j]=0;
 			}
 		}
-		if(BATCH_SIZE*batch/64>i){
+		if(Batch_Size[batch-1]/64>i){
 			used_in.push_back(0);
 			used_out.push_back(0);
 			min_pathOut_level.push_back(0);
@@ -80,7 +80,6 @@ obinstream & operator>>(obinstream & m, CCValue_pregel & v) {
 	return m;
 }
 ibinstream & operator<<(ibinstream & m, const my_Message & v) {
-	m << v.id;
 	m << v.level;
 	m << v.min_level;
 	m << v.fwdORbwd;
@@ -88,7 +87,6 @@ ibinstream & operator<<(ibinstream & m, const my_Message & v) {
 }
 
 obinstream & operator>>(obinstream & m, my_Message & v) {
-	m >> v.id;
 	m >> v.level;
 	m >> v.min_level;
 	m >> v.fwdORbwd;
@@ -141,7 +139,7 @@ public:
 	virtual void compute(MessageContainer & messages) {
 		if (step_num() == 1 || init_bit) {
 			value().init(); //init min path level
-			if (value().level>= (batch - 1) * BATCH_SIZE&& value().level <= batch * BATCH_SIZE-1) {
+			if (value().level>=begin_num&&value().level<begin_num+Batch_Size[batch-1]) {
 			my_Message a;
 			a.id=id;
 			a.level = value().level;
@@ -153,7 +151,7 @@ public:
 		}
 		vote_to_halt();
 	} else {
-		if (value().level < (batch - 1) * BATCH_SIZE ){
+		if (value().level < begin_num ){
 		    vote_to_halt();
 			return;
 		}// if it is the last batch's level,return immediately
@@ -171,8 +169,8 @@ public:
 			if (a.level < value().level) {// the source vertext's level is highter than mine
 				if (!a.min_level) {//it doesn't exist a vertex highter than it
 					if (a.fwdORbwd) {//same direction
-//						if(value().used_in&1<<(hashbacket(a.id)))
-//							continue;//has been push in
+						if(value().used_in[a.level/64]&1<<(hashbacket(a.level)-(a.level/64)*64))
+							continue;//has been push in
 //						vector<VertexID> temp;
 						//intersection should be (a.id|a.out)&(id|in_label)?
 //						set_intersection(mir[hashbacket(a.level)].out.begin(),
@@ -186,10 +184,11 @@ public:
 							value().used_in[a.level/64]|=(1<<(hashbacket(a.level)-(a.level/64)*64));
 						}else{
 								//pruning process goes here
+							continue;
 						}
 					} else if(!a.fwdORbwd){
-//						if(value().used_out&(1<<(hashbacket(a.id))))
-//							continue;
+						if(value().used_out[a.level/64]&(1<<(hashbacket(a.level)-(a.level/64)*64)))
+							continue;
 //						vector<VertexID> temp;
 						//intersection should be (a.id|a.out)&(id|in_label)?
 //						set_intersection(mir[hashbacket(a.level)].in.begin(),
@@ -202,7 +201,7 @@ public:
 							//include pruning here, if used_in is 1, no need broadcast anymore. no more than twice bfs
 							value().used_out[a.level/64]|=(1<<(hashbacket(a.level)-(a.level/64)*64));
 						}else{
-													//pruning process goes here
+							continue;					//pruning process goes here
 						}
 					}
 					broadcast(a);
@@ -243,6 +242,7 @@ public:
 }
 	void postbatch_compute(){
 		//the update process of label_in and label_out goes here
+
 	}
 };
 

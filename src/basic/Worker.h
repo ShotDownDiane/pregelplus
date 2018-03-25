@@ -10,8 +10,10 @@
 #include "../utils/Combiner.h"
 #include "../utils/Aggregator.h"
 using namespace std;
-#define BATCH_SIZE 4
 #define ST (printf("%s(%d) rank#%d:",_FILE_,_LINE_,_my_rank),printf)
+int Batch_Size[]={4,8,16,32};
+int begin_num=0;
+bool isBreak=false;
 struct mirror_vertex {
 	int id;
 	vector<VertexID> in;
@@ -40,13 +42,13 @@ obinstream & operator>>(obinstream & m, mirror_vertex & v) {
 }
 int batch;
 void init(){
-	mir.resize(BATCH_SIZE*batch+1);
-	for(int i=0;i<BATCH_SIZE*batch+1;i++){
+	mir.resize(Batch_Size[batch-1]);
+	for(int i=0;i<Batch_Size[batch-1];i++){
 		mir[i].id=-1;
 	}
 }
 int hashbacket(int id){
-	int myid= id%BATCH_SIZE;
+	int myid= id%(Batch_Size[batch-1]);
 //	while(mir[myid].id!=id&&mir[myid].id!=-1){
 //		myid=(myid+1)%BATCH_SIZE;
 //	}
@@ -192,7 +194,7 @@ public:
 		//consider move label_in(out) postbatch_process to vertex.postbatch_compute
 		int size = vertexes.size();
 		for(int i=0;i<size;i++){
-			for(int j=0;j<BATCH_SIZE;j++){
+			for(int j=0;j<Batch_Size[batch-2];j++){
 				if(vertexes[i]->value().used_in[j/64]&(1<<(j%64))){
 					vertexes[i]->value().in_label.push_back(mir[j].id);
 				}
@@ -201,11 +203,17 @@ public:
 				}
 			}
 		}
+
 		init();
 		vector<mirror_vertex>temp;
+		begin_num=begin_num+Batch_Size[batch-2];
+		if (begin_num > get_vnum()){
+			isBreak=true;
+			return; //all_halt AND no_msg
+		}
 		for(int i=0;i<size;i++){
 			//handle the label
-			if(vertexes[i]->value().level>(batch-1)*BATCH_SIZE-1&&vertexes[i]->value().level<=(batch)*BATCH_SIZE){
+			if(vertexes[i]->value().level>=begin_num&&vertexes[i]->value().level<=begin_num+Batch_Size[batch-1]){
 				mirror_vertex a;
 				a.id=vertexes[i]->value().level;
 				a.in=vertexes[i]->value().in_label;
@@ -398,11 +406,12 @@ public:
 				active_vnum() = all_sum(active_count);
 				if (active_vnum() == 0
 						&& getBit(HAS_MSG_ORBIT, bits_bor) == 0) {
-					if (batch == (get_vnum() / BATCH_SIZE)+1){
-						break; //all_halt AND no_msg
-					}
+
 					batch++;
 					postbatch();//consider move the following code to postbatch compute
+					if(isBreak){
+						break;
+					}
 					init_bit = 1;
 					active_vnum() = get_vnum();
 				}
