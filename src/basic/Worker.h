@@ -11,6 +11,7 @@
 #include "../utils/Aggregator.h"
 using namespace std;
 #define ST (printf("%s(%d) rank#%d:",_FILE_,_LINE_,_my_rank),printf)
+//4,400,100 all problem
 int Batch_Size[]={4,8,66,66};
 int begin_num=0;
 bool isBreak=false;//
@@ -49,10 +50,6 @@ void init(){
 }
 int hashbacket(int id){
 	int myid= id-begin_num;
-//	while(mir[myid].id!=id&&mir[myid].id!=-1){
-//		myid=(myid+1)%BATCH_SIZE;
-//	}
-	mir[myid].id=id;
 	return myid;
 }
 bool init_bit;

@@ -132,7 +132,7 @@ public:
 			if (value().level>=begin_num&&value().level<begin_num+Batch_Size[batch-1]) {
 			my_Message msg;
 			msg.level = value().level;
-//			cout << value().level << endl;
+			cout << value().level << endl;
 			msg.min_level = 0;//0 represent don't have a smaller one
 			msg.fwdORbwd = 1;//same with the eage direction
 			broadcast(msg);
@@ -224,7 +224,15 @@ public:
 					broadcast(a);
 				}
 			}else if(a.level==value().level){
-				if(a.min_level==1)broadcast(a);
+				if(a.min_level==1){
+					if(a.fwdORbwd){
+						value().min_pathIn_level[new_id/64]|=1<<(new_id%64);
+					}else{
+						value().min_pathOut_level[new_id/64]|=1<<(new_id%64);
+					}
+					broadcast(a);
+				}
+
 			}else {
 				a.min_level = 1; // there is a smaller  level in one path.
 				broadcast(a);
