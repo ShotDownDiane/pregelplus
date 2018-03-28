@@ -3,7 +3,7 @@
 #include "basic/Worker.h"
 #include "stdio.h"
 using namespace std;
-typedef unsigned long int uint64;
+
 //input line format: vertexID \t numOfNeighbors neighbor1 neighbor2 ...
 //output line format: v \t min_vertexID(v's connected component)
 
@@ -13,47 +13,20 @@ struct CCValue_pregel {
 	vector<VertexID> out_neighbor;
 	vector<VertexID> in_label;
 	vector<VertexID> out_label;
-	vector<uint64> used_in; //to be added to inlabel, set to 1, else 0
-	vector<uint64> used_out;
-	vector<uint64> min_pathOut_level; //from i to this point don't have a lower level than i.level ,set 0;
-	vector<uint64> min_pathIn_level;
+	vector<bitcontainer> used_in; //to be added to inlabel, set to 1, else 0
+	vector<bitcontainer> used_out;
+	vector<bitcontainer> min_pathOut_level; //from i to this point don't have a lower level than i.level ,set 0;
+	vector<bitcontainer> min_pathIn_level;
 	void init() {
-		/*
-		 * init before each batch, init size, set all value to 0
-		 */
-//		for(int i=0;i<50;i++){
-//			used_in[i]=0;
-//			used_out[i]=0;
-//			min_pathIn_level[i]=0;
-//			min_pathOut_level[i]=0;
-//		}
-		int i = used_in.size();
-		if (i == 0) {
-			i++;
-			used_in.push_back(0);
-			used_out.push_back(0);
-			min_pathOut_level.push_back(0);
-			min_pathIn_level.push_back(0);
-		} else {
-			for (int j = 0; j < i; j++) {
-				used_in[j] = 0;
-				used_out[j] = 0;
-				min_pathOut_level[j] = 0;
-				min_pathIn_level[j] = 0;
-			}
-		}
-		if (Batch_Size[batch - 1] / 64 > i) {
-			for (int j = 0; j < Batch_Size[batch - 1] / 64 - i; j++) {
-				used_in.push_back(0);
-				used_out.push_back(0);
-				min_pathOut_level.push_back(0);
-				min_pathIn_level.push_back(0);
-			}
-		}
+		vector<bitcontainer> init_vec;
+		init_vec.resize(Batch_Size[batch - 1] / 64 + 1, 0ul);
+		used_in = init_vec;
+		used_out = init_vec;
+		min_pathOut_level = init_vec;
+		min_pathIn_level = init_vec;
 	}
 };
 struct my_Message {
-//	int id;
 	int level; //source vertex level
 	bool min_level; //true: contains lower level than source vertex in path
 	bool fwdORbwd; //ture -> forward and false -> backward
@@ -150,22 +123,18 @@ public:
 			for (int i = 0; i < size; i++) {
 				my_Message &a = messages[i];
 				int new_id = hashbacket(a.level);
-				if (a.fwdORbwd
-						&& (value().min_pathIn_level[new_id / 64]
-								& (1 << (new_id % 64)))) { //exclude pruning
+				if (a.fwdORbwd && getbit(value().min_pathIn_level, new_id)) { //exclude pruning
 					continue; //has been handled
 				}
 				if ((!a.fwdORbwd)
-						&& (value().min_pathOut_level[new_id / 64]
-								& (1 << (new_id % 64)))) {
+						&& getbit(value().min_pathOut_level, new_id)) {
 					//exclude pruning
 					continue;//has been handled
 				}
 				if (a.level < value().level) { // the source vertext's level is highter than mine
 					if (!a.min_level) { //it doesn't exist a vertex highter than it
 						if (a.fwdORbwd) { //same direction
-							if (value().used_in[new_id / 64]
-									& (1 << (new_id % 64)))
+							if (getbit(value().used_in, new_id))
 								continue; //has been push in
 //						vector<VertexID> temp;
 								//intersection should be (a.id|a.out)&(id|in_label)?
@@ -178,15 +147,13 @@ public:
 									value().in_label)) { //if empty push in
 //							value().in_label.push_back(a.id);later handle the label,there only update the used arrays
 									//include pruning here, if used_in is 1, no need broadcast anymore. no more than twice bfs
-								value().used_in[new_id / 64] |= (1
-										<< (new_id % 64));
+								setbit(value().used_in, new_id);
 							} else {
 								//pruning process goes here
 								continue;
 							}
 						} else if (!a.fwdORbwd) {
-							if (value().used_out[new_id / 64]
-									& (1 << (new_id % 64)))
+							if (getbit(value().used_out, new_id))
 								continue;
 //						vector<VertexID> temp;
 							//intersection should be (a.id|a.out)&(id|in_label)?
@@ -199,8 +166,7 @@ public:
 									value().out_label)) {
 //							value().out_label.push_back(a.id);
 								//include pruning here, if used_in is 1, no need broadcast anymore. no more than twice bfs
-								value().used_out[new_id / 64] |= (1
-										<< (new_id % 64));
+								setbit(value().used_out, new_id);
 							} else {
 								continue; //pruning process goes here
 							}
@@ -209,11 +175,9 @@ public:
 					} else if (a.min_level) {
 //					vector<VertexID>::iterator Iter;
 						if (a.fwdORbwd) {
-							value().min_pathIn_level[new_id / 64] |= 1
-									<< (new_id % 64);
+							setbit(value().min_pathIn_level, new_id);
 //						if(value().used_in[new_id/64]&(1<<(new_id%64)))
-							value().used_in[new_id / 64] &=
-									~(1 << (new_id % 64)); //set 0
+							unsetbit(value().used_in, new_id); //set 0
 //						for (Iter = value().in_label.begin();
 //								Iter != value().in_label.end(); Iter++) {
 //							if (*Iter == a.level) {
@@ -221,11 +185,9 @@ public:
 //								break;
 //							}
 						} else {
-							value().min_pathOut_level[new_id / 64] |= 1
-									<< (new_id % 64); // log that there is a smaller one between this two vertexes
+							setbit(value().min_pathOut_level, new_id); // log that there is a smaller one between this two vertexes
 //						if(value().used_in[new_id/64]&(1<<(new_id%64))){
-							value().used_out[new_id / 64] &= ~(1
-									<< (new_id % 64)); // set 0
+							unsetbit(value().used_out, new_id); // set 0
 //							for (Iter = value().out_label.begin();
 //									Iter != value().out_label.end(); Iter++) {
 //								if (*Iter == a.level) {
@@ -240,11 +202,9 @@ public:
 				} else if (a.level == value().level) {
 					if (a.min_level == 1) {
 						if (a.fwdORbwd) {
-							value().min_pathIn_level[new_id / 64] |= 1
-									<< (new_id % 64);
+							setbit(value().min_pathIn_level, new_id);
 						} else {
-							value().min_pathOut_level[new_id / 64] |= 1
-									<< (new_id % 64);
+							setbit(value().min_pathOut_level, new_id);
 						}
 						broadcast(a);
 					}
@@ -258,8 +218,16 @@ public:
 		}
 	}
 	void postbatch_compute() {
-		//the update process of label_in and label_out goes here
-
+		if (value().level >= begin_num) {
+			for (int j = 0; j < Batch_Size[batch - 2]; j++) {
+				if (getbit(value().used_in, j)) {
+					value().in_label.push_back(mir[j].id);
+				}
+				if (getbit(value().used_out, j)) {
+					value().out_label.push_back(mir[j].id);
+				}
+			}
+		}
 	}
 };
 
