@@ -11,9 +11,9 @@
 #include "../utils/Aggregator.h"
 using namespace std;
 #define ST (printf("%s(%d) rank#%d:",_FILE_,_LINE_,_my_rank),printf)
-int Batch_Size[]={4,8,16,32};
+int Batch_Size[]={4,8,66,66};
 int begin_num=0;
-bool isBreak=false;
+bool isBreak=false;//
 struct mirror_vertex {
 	int id;
 	vector<VertexID> in;
@@ -48,7 +48,7 @@ void init(){
 	}
 }
 int hashbacket(int id){
-	int myid= id%(Batch_Size[batch-1]);
+	int myid= id-begin_num;
 //	while(mir[myid].id!=id&&mir[myid].id!=-1){
 //		myid=(myid+1)%BATCH_SIZE;
 //	}
@@ -186,20 +186,22 @@ public:
 
 	void postbatch(){
 		//postbatch process of each vertex
-		for (int i = 0; i < vertexes.size(); i++) {
-			vertexes[i]->postbatch_compute();
-		}
+//		for (int i = 0; i < vertexes.size(); i++) {
+//			vertexes[i]->postbatch_compute();
+//		}
 
 
 		//consider move label_in(out) postbatch_process to vertex.postbatch_compute
 		int size = vertexes.size();
 		for(int i=0;i<size;i++){
-			for(int j=0;j<Batch_Size[batch-2];j++){
-				if(vertexes[i]->value().used_in[j/64]&(1<<(j%64))){
-					vertexes[i]->value().in_label.push_back(mir[j].id);
-				}
-				if(vertexes[i]->value().used_out[j/64]&(1<<(j%64))){
-					vertexes[i]->value().out_label.push_back(mir[j].id);
+			if(vertexes[i]->value().level>=begin_num){
+				for(int j=0;j<Batch_Size[batch-2];j++){
+					if(vertexes[i]->value().used_in[j/64]&(1<<(j%64))){
+						vertexes[i]->value().in_label.push_back(mir[j].id);
+					}
+					if(vertexes[i]->value().used_out[j/64]&(1<<(j%64))){
+						vertexes[i]->value().out_label.push_back(mir[j].id);
+					}
 				}
 			}
 		}
@@ -213,12 +215,12 @@ public:
 		}
 		for(int i=0;i<size;i++){
 			//handle the label
-			if(vertexes[i]->value().level>=begin_num&&vertexes[i]->value().level<=begin_num+Batch_Size[batch-1]){
-				mirror_vertex a;
+			if(vertexes[i]->value().level>=begin_num&&vertexes[i]->value().level<begin_num+Batch_Size[batch-1]){
+				temp.resize(temp.size()+1);
+				mirror_vertex &a=temp.back();
 				a.id=vertexes[i]->value().level;
 				a.in=vertexes[i]->value().in_label;
 				a.out=vertexes[i]->value().out_label;
-				temp.push_back(a);
 			}
 		}
 		vector<mirror_vertex> to_get;
@@ -231,7 +233,6 @@ public:
 		for(int i=0;i<get_size;i++){
 			mir[hashbacket(temp[i].id)]=temp[i];
 		}
-
 	}
 
 	inline void add_vertex(VertexT* vertex) {
@@ -407,7 +408,8 @@ public:
 				if (active_vnum() == 0
 						&& getBit(HAS_MSG_ORBIT, bits_bor) == 0) {
 
-					batch++;
+					if(batch<4)
+						batch++;
 					postbatch();//consider move the following code to postbatch compute
 					if(isBreak){
 						break;
