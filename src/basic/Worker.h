@@ -41,7 +41,7 @@ void outputbitvec(vector<bitcontainer> &bitmapsets) {
 }
 
 //4,400,100 all problem
-int Batch_Size[] = { 100, 8, 66, 66 };
+int Batch_Size[] = { 4, 8, 66, 66 };
 int begin_num = 0;
 bool isBreak = false; //
 struct mirror_vertex {

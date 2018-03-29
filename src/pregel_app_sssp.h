@@ -211,6 +211,11 @@ public:
 
 				} else {
 					a.min_level = 1; // there is a smaller  level in one path.
+					if (a.fwdORbwd) {
+						setbit(value().min_pathIn_level, new_id);
+					} else {
+						setbit(value().min_pathOut_level, new_id);
+					}
 					broadcast(a);
 				}
 			}
@@ -242,10 +247,10 @@ public:
 		CCVertex_pregel* v = new CCVertex_pregel;
 		v->id = atoi(pch) - 1;
 //              int j = sprintf(buf, "%d ", v->id);
-		pch = strtok(NULL, " ");
+		pch = strtok(NULL, "\t");
 		v->value().level = atoi(pch) - 1;
 //              j += sprintf(buf + j, "%d ",v->value().level);
-		pch = strtok(NULL, " ");
+		pch = strtok(NULL, "\t");
 		int num = atoi(pch);
 //              j += sprintf(buf + j, "%d ",num);
 		for (int i = 0; i < num; i++) {
@@ -253,7 +258,7 @@ public:
 //                      j += sprintf(buf + j, "%d ",atoi(pch)-1);
 			v->value().out_neighbor.push_back(atoi(pch) - 1);
 		}
-		pch = strtok(NULL, " ");
+		pch = strtok(NULL, "\t");
 		num = atoi(pch);
 //              j += sprintf(buf + j, "%d ",num);
 		for (int i = 0; i < num; i++) {
