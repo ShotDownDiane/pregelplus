@@ -10,23 +10,44 @@
 #include "../utils/Combiner.h"
 #include "../utils/Aggregator.h"
 using namespace std;
-#define ST (printf("%s(%d) rank#%d:",_FILE_,_LINE_,_my_rank),printf)
+#define log(format, ...){fprintf(stdout, "[%s.%s()#%u] rank#%d " format "\n",__FILE__, __func__,  __LINE__, _my_rank, ##__VA_ARGS__ );}
+typedef unsigned long bitcontainer;
+#define unit_uint 1UL
+#define singlebitlength (sizeof(bitcontainer)*8)
+
+inline void setbit(vector<bitcontainer> &bitmapsets, unsigned int p) {
+	assert(singlebitlength*bitmapsets.size()>p);
+	bitmapsets[p / singlebitlength] |= unit_uint << p % singlebitlength;
+}
+inline void unsetbit(vector<bitcontainer> &bitmapsets, unsigned int p) {
+	assert(singlebitlength*bitmapsets.size()>p);
+	bitmapsets[p / singlebitlength] &= ~(unit_uint << p % singlebitlength);
+}
+inline bitcontainer getbit(vector<bitcontainer> &bitmapsets, unsigned int p) {
+	assert(singlebitlength*bitmapsets.size()>p);
+	return bitmapsets[p / singlebitlength] & (unit_uint << p % singlebitlength);
+}
+void outputbitvec(vector<bitcontainer> &bitmapsets) {
+	for (unsigned int j = 0; j < singlebitlength * bitmapsets.size(); j++) {
+		if (j % 8 == 0)
+			printf(" %d:", j);
+		if (getbit(bitmapsets, j)) {
+			printf("1");
+		} else {
+			printf("0");
+		}
+	}
+	printf("\n");
+}
+
 //4,400,100 all problem
-int Batch_Size[]={4,8,66,66};
-int begin_num=0;
-bool isBreak=false;//
+int Batch_Size[] = { 100, 8, 66, 66 };
+int begin_num = 0;
+bool isBreak = false; //
 struct mirror_vertex {
 	int id;
 	vector<VertexID> in;
 	vector<VertexID> out;
-	mirror_vertex& operator=(const  mirror_vertex& v){
-		in.clear();
-		out.clear();
-		id=v.id;
-		in.insert(in.begin(),v.in.begin(),v.in.end());
-		out.insert(out.begin(),v.out.begin(),v.out.end());
-		return *this;
-	}
 };
 vector<mirror_vertex> mir;
 ibinstream & operator<<(ibinstream & m, const mirror_vertex & v) {
@@ -42,14 +63,14 @@ obinstream & operator>>(obinstream & m, mirror_vertex & v) {
 	return m;
 }
 int batch;
-void init(){
-	mir.resize(Batch_Size[batch-1]);
-	for(int i=0;i<Batch_Size[batch-1];i++){
-		mir[i].id=-1;
+void init() {
+	mir.resize(Batch_Size[batch - 1]);
+	for (int i = 0; i < Batch_Size[batch - 1]; i++) {
+		mir[i].id = -1;
 	}
 }
-int hashbacket(int id){
-	int myid= id-begin_num;
+int hashbacket(int id) {
+	int myid = id - begin_num;
 	return myid;
 }
 bool init_bit;
@@ -137,7 +158,6 @@ public:
 	}
 	;
 
-
 	void active_compute() {
 		active_count = 0;
 		MessageBufT* mbuf = (MessageBufT*) get_message_buffer();
@@ -181,54 +201,40 @@ public:
 		}
 	}
 
-	void postbatch(){
-		//postbatch process of each vertex
-//		for (int i = 0; i < vertexes.size(); i++) {
-//			vertexes[i]->postbatch_compute();
-//		}
-
-
-		//consider move label_in(out) postbatch_process to vertex.postbatch_compute
-		int size = vertexes.size();
-		for(int i=0;i<size;i++){
-			if(vertexes[i]->value().level>=begin_num){
-				for(int j=0;j<Batch_Size[batch-2];j++){
-					if(vertexes[i]->value().used_in[j/64]&(1<<(j%64))){
-						vertexes[i]->value().in_label.push_back(mir[j].id);
-					}
-					if(vertexes[i]->value().used_out[j/64]&(1<<(j%64))){
-						vertexes[i]->value().out_label.push_back(mir[j].id);
-					}
-				}
-			}
-		}
-
+	void prebatch() {
 		init();
-		vector<mirror_vertex>temp;
-		begin_num=begin_num+Batch_Size[batch-2];
-		if (begin_num > get_vnum()){
-			isBreak=true;
+		vector<mirror_vertex> to_send;
+		begin_num = begin_num + Batch_Size[batch - 2];
+		if (begin_num > get_vnum()) {
+			isBreak = true;
 			return; //all_halt AND no_msg
 		}
-		for(int i=0;i<size;i++){
+		for (int i = 0; i < vertexes.size(); i++) {
 			//handle the label
-			if(vertexes[i]->value().level>=begin_num&&vertexes[i]->value().level<begin_num+Batch_Size[batch-1]){
-				temp.resize(temp.size()+1);
-				mirror_vertex &a=temp.back();
-				a.id=vertexes[i]->value().level;
-				a.in=vertexes[i]->value().in_label;
-				a.out=vertexes[i]->value().out_label;
+			if (vertexes[i]->value().level >= begin_num
+					&& vertexes[i]->value().level
+							< begin_num + Batch_Size[batch - 1]) {
+				to_send.resize(to_send.size() + 1);
+				mirror_vertex &a = to_send.back();
+				a.id = vertexes[i]->value().level;
+				a.in = vertexes[i]->value().in_label;
+				a.out = vertexes[i]->value().out_label;
 			}
 		}
 		vector<mirror_vertex> to_get;
-		all_to_all<mirror_vertex>(temp,to_get);
-		int get_size=to_get.size();
-		for(int i=0;i<get_size;i++){
-			mir[hashbacket(to_get[i].id)]=to_get[i];
+		all_to_all<mirror_vertex>(to_send, to_get);
+		int get_size = to_get.size();
+		for (int i = 0; i < get_size; i++) {
+			mir[hashbacket(to_get[i].id)] = to_get[i];
 		}
-		get_size=temp.size();
-		for(int i=0;i<get_size;i++){
-			mir[hashbacket(temp[i].id)]=temp[i];
+		get_size = to_send.size();
+		for (int i = 0; i < get_size; i++) {
+			mir[hashbacket(to_send[i].id)] = to_send[i];
+		}
+	}
+	void postbatch() {
+		for (int i = 0; i < vertexes.size(); i++) {
+			vertexes[i]->postbatch_compute();
 		}
 	}
 
@@ -390,8 +396,10 @@ public:
 		long long step_vadd_num;
 		long long global_msg_num = 0;
 		long long global_vadd_num = 0;
+		prebatch();
 		while (true) {
-			if(init_bit)init_bit=0;
+			if (init_bit)
+				init_bit = 0;
 			global_step_num++;
 			ResetTimer(4);
 			//===================
@@ -405,14 +413,15 @@ public:
 				if (active_vnum() == 0
 						&& getBit(HAS_MSG_ORBIT, bits_bor) == 0) {
 
-					if(batch<4)
+					if (batch < 4)
 						batch++;
-					postbatch();//consider move the following code to postbatch compute
-					if(isBreak){
+					postbatch(); //consider move the following code to postbatch compute
+					if (isBreak) {
 						break;
 					}
 					init_bit = 1;
 					active_vnum() = get_vnum();
+					prebatch();
 				}
 			} else
 				active_vnum() = get_vnum();
@@ -422,7 +431,7 @@ public:
 				agg->init();
 			//===================
 			clearBits();
-			if (wakeAll == 1||init_bit==1)
+			if (wakeAll == 1 || init_bit == 1)
 				all_compute();
 			else
 				active_compute();
